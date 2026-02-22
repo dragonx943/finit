@@ -1031,7 +1031,6 @@ static int service_run_script(svc_t *svc, char *script)
 {
 	const char *id = svc_ident(svc, NULL, 0);
 	pid_t pid = service_fork(svc);
-	int status, rc;
 
 	if (pid < 0) {
 		err(1, "%s: failed forking off script %s", id, script);
@@ -1047,6 +1046,8 @@ static int service_run_script(svc_t *svc, char *script)
 		};
 		char pidbuf[16];
 
+		redirect(svc);
+
 		snprintf(pidbuf, sizeof(pidbuf), "%d", svc->pid);
 		setenv("MAINPID", pidbuf, 1);
 
@@ -1056,23 +1057,7 @@ static int service_run_script(svc_t *svc, char *script)
 	}
 
 	dbg("%s: script '%s' started as PID %d", id, script, pid);
-	if (waitpid(pid, &status, 0) == -1) {
-		warn("%s: failed calling script %s", id, script);
-		return -1;
-	}
-
-	rc = WEXITSTATUS(status);
-	if (WIFEXITED(status)) {
-		dbg("%s: script '%s' exited without signal, status: %d", id, script, rc);
-	} else if (WIFSIGNALED(status)) {
-		dbg("%s: script '%s' terminated by signal %d", id, script, WTERMSIG(status));
-		if (!rc)
-			rc = 1;
-	} else {
-		dbg("%s: script '%s' exited with status: %d", id, script, rc);
-	}
-
-	return rc;
+	return service_script_add(svc, pid, svc->killdelay);
 }
 
 /* Ensure we don't have any notify socket lingering */
@@ -1093,15 +1078,31 @@ static void service_notify_stop(svc_t *svc)
  */
 static void service_cleanup(svc_t *svc)
 {
-	char *fn;
+	char cond[MAX_COND_LEN];
 
 	/* PID collected, cancel any pending SIGKILL */
 	service_timeout_cancel(svc);
 
-	fn = pid_file(svc);
-	if (fn && remove(fn) && errno != ENOENT)
-		logit(LOG_CRIT, "Failed removing service %s pidfile %s",
-		      svc_ident(svc, NULL, 0), fn);
+	/* Only clean up process' pidfile if managed by us */
+	if (svc_has_pidfile(svc)) {
+		char *fn = pid_file(svc);
+
+		if (remove(fn) && errno != ENOENT)
+			logit(LOG_CRIT, "Failed removing service %s pidfile %s",
+			      svc_ident(svc, NULL, 0), fn);
+	}
+
+	/*
+	 * Invalidate the pid/ condition for this service to ensure
+	 * dependent services are properly stopped and restarted.
+	 * Without this, the condition is only cleared asynchronously
+	 * via inotify on pidfile removal, which may not trigger when
+	 * the daemon fails to clean up its own pidfile, or when the
+	 * service dies during a reload cycle and goes directly from
+	 * RUNNING to HALTED (skipping STOPPING where cond_clear()
+	 * is normally called).
+	 */
+	cond_clear(mkcond(svc, cond, sizeof(cond)));
 
 	service_notify_stop(svc);
 
@@ -1140,7 +1141,7 @@ int service_stop(svc_t *svc)
 	service_timeout_cancel(svc);
 
 	if (svc->stop_script[0]) {
-		logit(LOG_CONSOLE | LOG_NOTICE, "%s[%d], calling stop:%s ...", id, svc->pid, svc->stop_script);
+		logit(LOG_CONSOLE | LOG_NOTICE, "Stopping %s[%d], calling stop:%s ...", id, svc->pid, svc->stop_script);
 	} else if (!svc_is_sysv(svc)) {
 		char *nm = pid_get_name(svc->pid, NULL, 0);
 		const char *sig = sig_name(svc->sighalt);
@@ -1155,10 +1156,10 @@ int service_stop(svc_t *svc)
 		}
 
 		dbg("Sending %s to pid:%d name:%s(%s)", sig, svc->pid, id, nm);
-		logit(LOG_CONSOLE | LOG_NOTICE, "%s[%d], stopping, sending %s ...", id, svc->pid, sig);
+		logit(LOG_CONSOLE | LOG_NOTICE, "Stopping %s[%d], sending %s ...", id, svc->pid, sig);
 	} else {
 		compose_cmdline(svc, cmdline, sizeof(cmdline));
-		logit(LOG_CONSOLE | LOG_NOTICE, "%s[%d], calling '%s stop' ...", id, svc->pid, cmdline);
+		logit(LOG_CONSOLE | LOG_NOTICE, "Stopping %s[%d], calling '%s stop' ...", id, svc->pid, cmdline);
 	}
 
 	/*
@@ -1278,7 +1279,7 @@ static int service_reload(svc_t *svc)
 		print_desc("Restarting ", svc->desc);
 
 	if (svc->reload_script[0]) {
-		logit(LOG_CONSOLE | LOG_NOTICE, "%s[%d], calling reload:%s ...", id, svc->pid, svc->reload_script);
+		logit(LOG_CONSOLE | LOG_NOTICE, "Reloading %s[%d], calling reload:%s ...", id, svc->pid, svc->reload_script);
 		rc = service_run_script(svc, svc->reload_script);
 	} else 	if (svc->sighup) {
 		if (svc->pid <= 1) {
@@ -1286,8 +1287,8 @@ static int service_reload(svc_t *svc)
 			svc->start_time = svc->pid = 0;
 			goto done;
 		}
-		dbg("%s[%d], sending SIGHUP", id, svc->pid);
-		logit(LOG_CONSOLE | LOG_NOTICE, "%s[%d], sending SIGHUP ...", id, svc->pid);
+		dbg("Reloading %s[%d], sending SIGHUP", id, svc->pid);
+		logit(LOG_CONSOLE | LOG_NOTICE, "Reloading %s[%d], sending SIGHUP ...", id, svc->pid);
 		rc = kill(svc->pid, SIGHUP);
 		if (rc == -1 && (errno == ESRCH || errno == ENOENT)) {
 			/* nobody home, reset internal state machine */
@@ -3134,6 +3135,19 @@ restart:
 		case COND_ON:
 			kill(svc->pid, SIGCONT);
 			svc_set_state(svc, SVC_RUNNING_STATE);
+
+			/*
+			 * Propagate reload (~): upstream reloaded, so
+			 * we must also reload/restart, not just resume.
+			 */
+			if (svc->flux_reload && !svc_is_changed(svc)) {
+				if (svc_is_noreload(svc))
+					service_stop(svc);
+				else
+					service_reload(svc);
+				break;
+			}
+
 			/* Reassert condition if we go from waiting and no change */
 			if (!svc_is_changed(svc)) {
 				if (svc->notify == SVC_NOTIFY_PID) {
