@@ -63,8 +63,36 @@ static struct {
 	int        skip_bootstrap; /* Set to skip bootstrap waiting */
 } sm;
 
+/* Shutdown trace: set SHUTDOWN_DEBUG to 1 in sm.h to enable */
+#define shutdbg(fmt, args...) do {					\
+	if (SHUTDOWN_DEBUG && (runlevel == 0 || runlevel == 6))		\
+		cprintf("shutdown[%c]: " fmt "\n",			\
+			sm_rl2ch(runlevel), ##args);			\
+} while (0)
+
 static uev_t console_watcher;
 static int console_fd = -1;
+
+/*
+ * Shutdown watchdog: if graceful service stop takes too long,
+ * force do_shutdown() directly from the event loop callback.
+ * Default timeout is 30 seconds, adjustable at build time.
+ */
+#ifndef SHUTDOWN_WDT_TIMEOUT
+#define SHUTDOWN_WDT_TIMEOUT 30
+#endif
+static uev_t shutdown_wdt;
+
+static void shutdown_wdt_cb(uev_t *w, void *arg, int events)
+{
+	(void)w;
+	(void)arg;
+	(void)events;
+
+	logit(LOG_CONSOLE | LOG_CRIT, "Timed out (%d sec) waiting for services to stop, forcing shutdown.",
+	      SHUTDOWN_WDT_TIMEOUT);
+	do_shutdown(halt);
+}
 
 /*
  * Console input callback - handles Ctrl-C during bootstrap wait
@@ -350,6 +378,7 @@ restart:
 
 		/* reload ? */
 		if (sm.reload) {
+			shutdbg("RUNNING got reload request!");
 			sm.reload = 0;
 			sm.state = SM_RELOAD_CHANGE_STATE;
 		}
@@ -362,9 +391,15 @@ restart:
 
 		/* Restore terse mode and run hooks before shutdown */
 		if (runlevel == 0 || runlevel == 6) {
+			shutdbg("entering CHANGE state, starting %d sec watchdog",
+				SHUTDOWN_WDT_TIMEOUT);
+			uev_timer_init(ctx, &shutdown_wdt, shutdown_wdt_cb,
+				       NULL, SHUTDOWN_WDT_TIMEOUT * 1000, 0);
 			api_exit();
 			log_exit();
+			shutdbg("running HOOK_SHUTDOWN ...");
 			plugin_run_hooks(HOOK_SHUTDOWN);
+			shutdbg("HOOK_SHUTDOWN done");
 		}
 
 		dbg("Setting new runlevel --> %c <-- previous %c", sm_rl2ch(runlevel), sm_rl2ch(prevlevel));
@@ -384,12 +419,14 @@ restart:
 		}
 
 		/* Reset once flag of runtasks */
+		shutdbg("runtask_clean + step_all ...");
 		service_runtask_clean();
 
 		dbg("Stopping services not allowed in new runlevel ...");
 		sm.in_reload = 1;
 		service_step_all(SVC_TYPE_ANY);
 
+		shutdbg("CHANGE done, entering WAIT");
 		sm.state = SM_RUNLEVEL_WAIT_STATE;
 		break;
 
@@ -400,9 +437,12 @@ restart:
 		 */
 		svc = svc_stop_completed();
 		if (svc) {
+			shutdbg("WAIT, collecting %s[%d] ...", svc_ident(svc, NULL, 0), svc->pid);
 			dbg("Waiting to collect %s, cmd %s(%d) ...", svc_ident(svc, NULL, 0), svc->cmd, svc->pid);
 			break;
 		}
+
+		shutdbg("WAIT done, all services stopped");
 
 		/* Prev runlevel services stopped, call hooks before starting new runlevel ... */
 		dbg("All services have been stopped, calling runlevel change hooks ...");
@@ -416,6 +456,7 @@ restart:
 		sm.in_reload = 0;
 		service_step_all(SVC_TYPE_ANY);
 
+		shutdbg("entering CLEAN");
 		sm.state = SM_RUNLEVEL_CLEAN_STATE;
 		break;
 
@@ -427,10 +468,14 @@ restart:
 		 */
 		svc = svc_clean_completed();
 		if (svc) {
+			shutdbg("CLEAN, waiting for %s[%d] (%s) ...",
+				svc_ident(svc, NULL, 0), svc->pid, svc_status(svc));
 			dbg("Waiting to collect post/cleanup script for %s, cmd %s(%d) ...",
 			    svc_ident(svc, NULL, 0), svc->cmd, svc->pid);
 			break;
 		}
+
+		shutdbg("CLEAN done, all post/cleanup scripts collected");
 
 		/* Cleanup stale services */
 		svc_clean_dynamic(service_unregister);
@@ -447,9 +492,15 @@ restart:
 		 *  Tannhäuser Gate.  All those .. moments .. will be lost in time, like
 		 *  tears ... in ... rain."
 		 */
-		if (runlevel == 0 || runlevel == 6)
+		if (runlevel == 0 || runlevel == 6) {
+			shutdbg("calling do_shutdown()");
+			uev_timer_stop(&shutdown_wdt);
 			do_shutdown(halt);
+			shutdbg("do_shutdown() returned to SM!");
+		}
 
+		shutdbg("entering RUNNING (reload=%d, newlevel=%d)",
+			sm.reload, sm.newlevel);
 		sm.state = SM_RUNNING_STATE;
 		break;
 

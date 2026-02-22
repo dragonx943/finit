@@ -303,6 +303,8 @@ void do_shutdown(shutop_t op)
 	int in_cont = in_container();
 	int signo = SIGTERM;
 
+	if (SHUTDOWN_DEBUG) cprintf("do_shutdown: entered, op=%d\n", op);
+
 	if (!in_cont) {
 		/*
 		 * On a PREEMPT-RT system, Finit must run as the highest prioritized
@@ -322,6 +324,7 @@ void do_shutdown(shutop_t op)
 	 * Tell remaining non-monitored processes to exit, give them
 	 * time to exit gracefully, 2 sec was customary, we go for 1.
 	 */
+	if (SHUTDOWN_DEBUG) cprintf("do_shutdown: killing remaining processes ...\n");
 	iterate_proc(kill_cb, &signo);
 	if (do_wait(1)) {
 		signo = SIGKILL;
@@ -329,6 +332,7 @@ void do_shutdown(shutop_t op)
 	}
 
 	/* Exit plugins gracefully */
+	if (SHUTDOWN_DEBUG) cprintf("do_shutdown: plugin_exit() + cond_exit() ...\n");
 	plugin_exit();
 
 	/* We can no longer act on conditions, activate script runner */
@@ -351,12 +355,14 @@ void do_shutdown(shutop_t op)
 	for (int fd = 3; fd < 128; fd++)
 		close(fd);
 
+	if (SHUTDOWN_DEBUG) cprintf("do_shutdown: vfork, child will reboot ...\n");
 	if (vfork()) {
 		/*
 		 * Put PID 1 aside and let child perform reboot/halt
 		 * kernel may exit child and we don't want to exit PID 1
 		 * ... causing "aiii killing init" during reboot ...
 		 */
+		if (SHUTDOWN_DEBUG) cprintf("do_shutdown: PID 1 returning from vfork\n");
 		return;
 	}
 
