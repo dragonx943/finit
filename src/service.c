@@ -1079,15 +1079,18 @@ static void service_notify_stop(svc_t *svc)
 static void service_cleanup(svc_t *svc)
 {
 	char cond[MAX_COND_LEN];
-	char *fn;
 
 	/* PID collected, cancel any pending SIGKILL */
 	service_timeout_cancel(svc);
 
-	fn = pid_file(svc);
-	if (fn && remove(fn) && errno != ENOENT)
-		logit(LOG_CRIT, "Failed removing service %s pidfile %s",
-		      svc_ident(svc, NULL, 0), fn);
+	/* Only clean up process' pidfile if managed by us */
+	if (svc_has_pidfile(svc)) {
+		char *fn = pid_file(svc);
+
+		if (remove(fn) && errno != ENOENT)
+			logit(LOG_CRIT, "Failed removing service %s pidfile %s",
+			      svc_ident(svc, NULL, 0), fn);
+	}
 
 	/*
 	 * Invalidate the pid/ condition for this service to ensure
