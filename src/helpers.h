@@ -68,6 +68,7 @@ void    printv          (const char *fmt, va_list ap);
 void    print           (int action, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
 void    print_desc      (char *action, char *desc);
 int     print_result    (int fail);
+void    print_exit      (void);
 
 void    set_hostname    (char **hostname);
 void    networking      (int updown);
