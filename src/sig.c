@@ -424,14 +424,17 @@ void do_shutdown(shutop_t op)
 		}
 
 		print(0, "Rebooting ...");
+		print_exit();
 		reboot(RB_AUTOBOOT);
 	} else if (op == SHUT_OFF) {
 		print(0, "Powering down ...");
+		print_exit();
 		reboot(RB_POWER_OFF);
 	}
 
 	/* Also fallback if any of the other two fails */
 	print(0, "Halting ...");
+	print_exit();
 	reboot(RB_HALT_SYSTEM);
 }
 

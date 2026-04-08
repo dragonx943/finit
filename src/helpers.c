@@ -50,6 +50,7 @@
 
 static pstyle_t progress_onoff = PROGRESS_DEFAULT;
 static pstyle_t progress_style = PROGRESS_DEFAULT;
+static char     last_desc[512];	/* saved description for re-print after interruption */
 
 #ifndef HOSTNAME_PATH
 #define HOSTNAME_PATH "/etc/hostname"
@@ -336,6 +337,8 @@ void printv(const char *fmt, va_list ap)
 	len = print_timestamp(buf, sizeof(buf));
 	vsnprintf(&buf[len], sizeof(buf) - len, fmt, ap);
 
+	strlcpy(last_desc, &buf[len], sizeof(last_desc));	/* save for re-print */
+
 	if (progress_style == PROGRESS_CLASSIC)
 		cprintf("\r%s ", pad(buf, sizeof(buf), ".", sizeof(buf)));
 	else
@@ -344,24 +347,65 @@ void printv(const char *fmt, va_list ap)
 
 void print(int rc, const char *fmt, ...)
 {
+	char buf[ttcols];
+	size_t len;
+
 	if (progress_style == PROGRESS_SILENT)
 		return;
+
+	buf[0] = 0;
+	len = print_timestamp(buf, sizeof(buf));
 
 	if (fmt) {
 		va_list ap;
 
 		va_start(ap, fmt);
-		printv(fmt, ap);
+		vsnprintf(&buf[len], sizeof(buf) - len, fmt, ap);
 		va_end(ap);
+		strlcpy(last_desc, &buf[len], sizeof(last_desc));
+	} else if (rc >= 0 && last_desc[0]) {
+		/*
+		 * No new description, but we have one saved from an earlier
+		 * print(-1, ...) call.  Re-print it so the final status is not
+		 * left stranded if command output or a kernel message scrolled
+		 * away the original description line.
+		 */
+		strlcpy(&buf[len], last_desc, sizeof(buf) - len);
+	} else {
+		buf[0] = 0;
 	}
 
-	if (rc < 0)
+	if (rc < 0) {
+		/* Pending state: show description with spinner, no final status yet */
+		if (!buf[0])
+			return;
+		delline();
+		if (progress_style == PROGRESS_CLASSIC)
+			cprintf("\r%s ", pad(buf, sizeof(buf), ".", sizeof(buf)));
+		else
+			cprintf("\r\e[K%s%s", status(3), buf);
 		return;
+	}
 
-	if (progress_style == PROGRESS_CLASSIC)
-		cprintf("%s\n", status(rc));
-	else
-		cprintf("\r%s\n", status(rc));
+	/*
+	 * Final status.  Emit description + status in a single cprintf() so
+	 * both reach the console in one write(), preventing kernel messages or
+	 * command output from splitting the description from its [ OK ]/[FAIL].
+	 */
+	last_desc[0] = 0;
+
+	if (buf[0]) {
+		delline();
+		if (progress_style == PROGRESS_CLASSIC)
+			cprintf("\r%s %s\n", pad(buf, sizeof(buf), ".", sizeof(buf)), status(rc));
+		else
+			cprintf("\r\e[K%s%s\r%s\n", status(3), buf, status(rc));
+	} else {
+		if (progress_style == PROGRESS_CLASSIC)
+			cprintf("%s\n", status(rc));
+		else
+			cprintf("\r%s\n", status(rc));
+	}
 }
 
 void print_desc(char *action, char *desc)
@@ -373,6 +417,18 @@ int print_result(int fail)
 {
 	print(!!fail, NULL);
 	return fail;
+}
+
+/*
+ * Reset console state and drain the output buffer before kernel takeover.
+ * Called just before reboot()/halt() to prevent ANSI escape codes from
+ * leaking into bootloader or early-kernel output.
+ */
+void print_exit(void)
+{
+	tcdrain(STDERR_FILENO);
+	dprint(STDERR_FILENO, "\e[0m\e[?25h", 10);	/* reset SGR, show cursor */
+	tcdrain(STDERR_FILENO);
 }
 
 void set_hostname(char **hostname)
