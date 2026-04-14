@@ -1,6 +1,6 @@
 /* Plymouth boot splash plugin for Finit
  *
- * Copyright (c) 2012-2026  Aaron Andersen <troglobit@gmail.com>
+ * Copyright (c) 2012-2026  Aaron Andersen <aaron@fosslib.net>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
