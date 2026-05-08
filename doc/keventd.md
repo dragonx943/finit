@@ -20,9 +20,11 @@ kernel events and handles:
 
 - **Device node creation**: creates and removes `/dev` nodes with
   correct permissions on device add/remove events
-- **Persistent symlinks**: creates `/dev/disk/by-id/`, `/dev/disk/by-path/`,
-  and `/dev/input/by-id/`, `/dev/input/by-path/` symlinks for stable
-  device naming
+- **udev rules**: matches events against rules read from
+  `/lib/udev/rules.d/`, `/run/udev/rules.d/`, and `/etc/udev/rules.d/`,
+  with a curated ruleset derived from eudev installed by default
+- **Persistent symlinks**: creates `by-id` and `by-path` symlinks under
+  `/dev/disk/`, `/dev/input/`, and elsewhere, for stable device naming
 - **Firmware loading**: responds to kernel firmware requests by searching
   `/lib/firmware/` and writing firmware data to sysfs
 - **Module loading**: parses `MODALIAS` from uevents and spawns `modprobe`
@@ -70,19 +72,25 @@ device subsystem and name:
 Persistent Symlinks
 -------------------
 
-For block devices, keventd creates symlinks under `/dev/disk/`:
+Symlinks come from two places.  A handful are built into keventd and are
+created for every device in the subsystem, whatever rules are loaded.
+
+For block devices, under `/dev/disk/`:
 
 - **by-id**: based on the device serial number and model, read from
   sysfs attributes (`/sys/.../device/vendor`, `model`, `serial`)
 - **by-path**: based on the device topology path
 
-For input devices, symlinks are created under `/dev/input/`:
+For input devices, under `/dev/input/`:
 
 - **by-id**: based on the device name from sysfs
 - **by-path**: based on the physical device path
 
-These symlinks are tracked internally and automatically removed when the
-corresponding device is unplugged.
+The rest come from `SYMLINK+=` in the udev rules, so what you get
+depends on the ruleset installed.
+
+Built-in and rule-provided symlinks alike are tracked internally and
+removed when the corresponding device is unplugged.
 
 
 Firmware Loading
@@ -221,7 +229,7 @@ battery:
 Usage
 -----
 
-    keventd [-cdGhnpv] [-g GROUP]
+    keventd [-cdGhnpv] [-g GROUP] [-r DIR]
 
     Options:
       -c        Run coldplug at startup
@@ -231,6 +239,7 @@ Usage
       -h        Show help text
       -n        Run in foreground (no daemon)
       -p        Passive mode: power supply events only
+      -r DIR    Extra rules directory
       -v        Show version
 
 In normal operation, Finit starts keventd automatically via its system
