@@ -2828,13 +2828,18 @@ static void service_retry(svc_t *svc)
 	timeout = ((*restart_cnt) <= (svc->restart_max / 2)) ? 2000 : 5000;
 	/* If a longer timeout was specified in the conf, use that instead. */
 	svc->restart_tmo = max(svc->restart_tmo, timeout);
-	logit(LOG_CONSOLE|LOG_WARNING, "Service %s[%d] died (%s%d), restarting (retry in %d msec) (attempt: %d/%d)",
-	      svc_ident(svc, NULL, 0), svc->oldpid,
-	      WIFEXITED(svc->status) ? "with exit status: " : "by signal: ",
-	      WIFEXITED(svc->status) ? WEXITSTATUS(svc->status) : WTERMSIG(svc->status),
-	      svc->restart_tmo,
-	      *restart_cnt,
-	      svc->restart_max);
+	if (WIFEXITED(svc->status))
+		logit(LOG_CONSOLE|LOG_WARNING,
+		      "Service %s[%d] died (exit status: %d), restarting (retry in %d msec) (attempt: %d/%d)",
+		      svc_ident(svc, NULL, 0), svc->oldpid, WEXITSTATUS(svc->status),
+		      svc->restart_tmo, *restart_cnt, svc->restart_max);
+	else
+		logit(LOG_CONSOLE|LOG_WARNING,
+		      "Service %s[%d] died (killed by %s%s), restarting (retry in %d msec) (attempt: %d/%d)",
+		      svc_ident(svc, NULL, 0), svc->oldpid,
+		      sig_name(WTERMSIG(svc->status)),
+		      WCOREDUMP(svc->status) ? ", core dumped" : "",
+		      svc->restart_tmo, *restart_cnt, svc->restart_max);
 
 	svc_unblock(svc);
 	service_step(svc);
