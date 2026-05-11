@@ -201,7 +201,10 @@ int pid_file_set(svc_t *svc, char *file, int not)
  * pid:!foo          --> !/run/foo.pid
  * pid:!/run/foo.pid --> !/run/foo.pid
  *
- * Note, nothing is created or removed by Finit in this latter form.
+ * Nothing is created or removed by Finit in this latter form, with one
+ * exception: a verifiably stale pidfile (still names the just-reaped
+ * PID, and that PID is no longer alive) is removed so the next instance
+ * can start.  See service_clean_pidfile() in src/service.c.
  */
 int pid_file_parse(svc_t *svc, char *arg)
 {
