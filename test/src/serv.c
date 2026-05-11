@@ -34,6 +34,7 @@ volatile sig_atomic_t reloading = 1;
 volatile sig_atomic_t running   = 1;
 static char *ident = PROGNM;
 static char fn[80];
+static int  exclusive = 0;	/* -x: refuse to start if pidfile exists (dbus-style) */
 
 static void verify_env(char *arg)
 {
@@ -122,7 +123,7 @@ static void writefn(char *fn, int val)
 
 static int checkfn(char *fn)
 {
-	return !access(fn, R_OK);
+	return !access(fn, F_OK);
 }
 
 static void mine(char *fn)
@@ -133,11 +134,17 @@ static void mine(char *fn)
 
 static void pidfile(char *pidfn)
 {
+	static int once = 0;
+
 	if (!pidfn) {
 		if (fn[0] == 0)
 			snprintf(fn, sizeof(fn), "%s%s.pid", _PATH_VARRUN, ident);
 		pidfn = fn;
 	}
+
+	if (exclusive && !once && checkfn(pidfn))
+		errx(EX_SOFTWARE, "PID file %s exists, refusing to start", pidfn);
+	once = 1;
 
 	if (!checkfn(pidfn)) {
 		pid_t pid;
@@ -148,7 +155,7 @@ static void pidfile(char *pidfn)
 		atexit(cleanup);
 	} else {
 		inf("Touching PID file %s", pidfn);
-		utimensat(0, fn, NULL, 0);
+		utimensat(AT_FDCWD, pidfn, NULL, 0);
 	}
 }
 
@@ -182,6 +189,7 @@ static int usage(int rc)
 		" -p       Create PID file despite running in foreground\n"
 		" -P FILE  Create PID file using FILE\n"
 		" -r SVC   Call initctl to restart service SVC (self)\n"
+		" -x       Refuse to start if PID file already exists (dbus-style)\n"
 		"\n"
 		"By default this program daemonizes itself to the background, and,\n"
 		"when it's done setting up its signal handler(s), creates a PID file\n"
@@ -212,7 +220,7 @@ int main(int argc, char *argv[])
 	char cmd[80];
 	int c;
 
-	while ((c = getopt(argc, argv, "cCe:E:f:F:hi:nN:pP:r:")) != EOF) {
+	while ((c = getopt(argc, argv, "cCe:E:f:F:hi:nN:pP:r:x")) != EOF) {
 		switch (c) {
 		case 'c':
 			do_crash = 1;
@@ -249,11 +257,16 @@ int main(int argc, char *argv[])
 			break;
 		case 'P':
 			pidfn = optarg;
+			if ((size_t)snprintf(fn, sizeof(fn), "%s", optarg) >= sizeof(fn))
+				errx(EX_USAGE, "-P path too long (max %zu)", sizeof(fn) - 1);
 			do_pidfile++;
 			break;
 		case 'r':
 			snprintf(cmd, sizeof(cmd), "initctl restart %s", optarg);
 			do_restart = 1;
+			break;
+		case 'x':
+			exclusive = 1;
 			break;
 		default:
 			return usage(1);
