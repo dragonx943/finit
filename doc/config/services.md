@@ -31,6 +31,14 @@ basename of the binary to guess the PID file to watch for the PID:
 `/var/run/ntpd.pid`.  If Finit guesses wrong, you have to submit the
 full `pid:!/path/to/file.pid`.
 
+With `pid:!/path`, the file belongs to the service: Finit reads it
+but does not create or remove it.  The one exception is *stale*
+cleanup — if the service dies without removing its own pidfile
+(SIGKILL, OOM, segfault), and the file still names the just-reaped
+PID, Finit removes it before the next retry.  This prevents daemons
+that refuse to start on an existing pidfile (e.g. `dbus-daemon`)
+from getting stuck in a crash-restart loop.
+
 **Example:**
 
 In the case of `ospfd` (below), we omit the `-d` flag (daemonize) to

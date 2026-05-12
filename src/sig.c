@@ -630,7 +630,7 @@ const char *sig_name(int signo)
 			return signames[i].name;
 	}
 
-	return "SIGUNKOWN";
+	return "SIGUNKNOWN";
 }
 
 /*

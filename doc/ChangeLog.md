@@ -3,6 +3,31 @@ Change Log
 
 All relevant changes are documented in this file.
 
+[Unreleased]
+------------
+
+### Changes
+
+- Restart log now spells out the signal name and flags core dumps,
+  e.g. `killed by SIGKILL` or `killed by SIGSEGV, core dumped`, in
+  place of the bare numeric `by signal: N`.  Gives operators a much
+  stronger breadcrumb when a daemon dies unexpectedly
+
+### Fixes
+
+- Remove stale daemon-owned (`pid:!`) pidfiles after unclean exits.
+  When a daemon dies via SIGKILL/OOM/segfault, or exits early during
+  startup, its pidfile lingers and can prevent the next instance from
+  starting -- `dbus-daemon` for example refuses to start when its
+  pidfile already exists, so Finit's restart loop gives up.  Finit now
+  drops the file when it still names the just-reaped PID and that PID
+  is no longer alive (the liveness check guards against PID reuse).
+  This is a controlled exception to the long-standing rule that Finit
+  does not touch service-owned pidfiles
+- Fix misspelled `SIGUNKOWN` returned by `sig_name()` for unknown
+  signal numbers, now spelled correctly as `SIGUNKNOWN`.  Surfaced by
+  the new restart log above
+
 [4.17][] - 2026-04-28
 ---------------------
 
