@@ -87,7 +87,21 @@ For input devices, under `/dev/input/`:
 - **by-path**: based on the physical device path
 
 The rest come from `SYMLINK+=` in the udev rules, so what you get
-depends on the ruleset installed.
+depends on the ruleset installed.  The curated rules Finit ships add,
+among others:
+
+| **Directory**  | **Links**                                              |
+|----------------|--------------------------------------------------------|
+| `/dev/disk/`   | `by-uuid`, `by-label`, `by-partuuid`, `by-partlabel`, `by-diskseq`, and further `by-id` and `by-path` names for NVMe, virtio, MMC, WWN, and FireWire |
+| `/dev/input/`  | longer `by-id` and `by-path` names than the built-in ones, down to the USB interface number |
+| `/dev/serial/` | `by-id`, `by-path`                                     |
+| `/dev/snd/`    | `by-id`, `by-path`                                     |
+| `/dev/v4l/`    | `by-id`, `by-path`                                     |
+| `/dev/tape/`   | `by-id`, `by-path`                                     |
+| `/dev/dri/`    | `by-path`                                              |
+
+They also set up a few fixed names: `/dev/rtc`, `/dev/cdrom`, and
+`/dev/virtio-ports/<name>`.
 
 Built-in and rule-provided symlinks alike are tracked internally and
 removed when the corresponding device is unplugged.
