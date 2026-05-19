@@ -6,8 +6,11 @@ with Finit.  It replaces the need for external device managers like
 mdev, mdevd, or udevd on systems where a lighter-weight solution is
 preferred, particularly on embedded systems.
 
-It is enabled by default since Finit v5.  To disable it and use an
-external device manager instead:
+It is enabled by default since Finit v5, and needs libblkid from
+util-linux (the `libblkid-dev` package, or whatever your distribution
+calls it) to read the filesystem UUID and label behind the
+`/dev/disk/by-uuid/` and `/dev/disk/by-label/` symlinks.  To disable it
+and use an external device manager instead:
 
     ./configure --without-keventd
 
@@ -102,6 +105,10 @@ among others:
 
 They also set up a few fixed names: `/dev/rtc`, `/dev/cdrom`, and
 `/dev/virtio-ports/<name>`.
+
+The `by-uuid` and `by-label` links are why keventd needs libblkid.  The
+rules read the filesystem metadata off the device with
+`IMPORT{builtin}="blkid"`, and libblkid is what that builtin calls.
 
 Built-in and rule-provided symlinks alike are tracked internally and
 removed when the corresponding device is unplugged.
@@ -252,8 +259,6 @@ Usage
       -G        Disable netlink rebroadcast entirely
       -h        Show help text
       -n        Run in foreground (no daemon)
-      -p        Passive mode: power supply events only
-      -r DIR    Extra rules directory
       -v        Show version
 
 In normal operation, Finit starts keventd automatically via its system
