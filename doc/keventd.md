@@ -227,8 +227,59 @@ devices:
         command     = "/usr/sbin/gps-daemon"
     }
 
+Network interfaces are not device nodes and do not live in the `dev/`
+namespace -- a `/dev/wan` node created by a user must not be confused
+with a `wan` interface.  To wait for an interface, use the `netlink`
+plugin's `net/<iface>/exist` condition, plus `net/<iface>/up` (admin
+up) and `net/<iface>/running` (carrier present) to gate on link state:
+
+    service dhcpcd {
+        description = "DHCP client"
+        runlevel    = "2345"
+        conditions  = { "net/wan/exist" }
+        command     = "/usr/sbin/dhcpcd"
+    }
+
+keventd provides the parallel `class/net/<iface>` condition, like for
+any other sysfs class device.
+
 When the device is removed, the condition is cleared and Finit stops
 the dependent services.
+
+### Class Conditions (`class/`)
+
+Many devices live in sysfs without a `/dev/` node -- DSA switch ports,
+IIO sensors, LEDs, backlight, PHYs, regulators.  For those, keventd
+asserts `class/<subsystem>/<sysname>` on every `add` event so services
+can still wait for them:
+
+    service blink-blue {
+        description = "LED driver"
+        runlevel    = "2345"
+        conditions  = { "class/leds/blue" }
+        command     = "/usr/sbin/blink-blue"
+    }
+
+The condition is cleared on `remove`.
+
+### Driver Conditions (`driver/`)
+
+`driver/<name>` is asserted while the driver `<name>` is bound to at
+least one device, from the kernel's `bind`/`unbind` uevents.  Use this
+to gate on slow-probing hardware whose readiness isn't marked by a
+class device or `/dev` node, such as a switch core or complex PHY:
+
+    service dsa-probe {
+        description = "DSA topology probe"
+        runlevel    = "2345"
+        conditions  = { "driver/mt7530" }
+        command     = "/usr/sbin/dsa-probe"
+    }
+
+A driver bound to several devices keeps the condition asserted until
+the last device is unbound.  To wait for one specific device instance,
+gate on what its probe creates instead: the `class/` condition or
+`/dev` node of the child device.
 
 ### Power Supply Conditions (`sys/pwr/`)
 

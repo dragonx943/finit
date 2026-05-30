@@ -7,12 +7,16 @@
 
 #define COND_BASE      "finit/cond"
 #define COND_DEV       "dev/"
+#define COND_DRIVER    "driver/"
+#define COND_CLASS     "class/"
 #define COND_PID       "pid/"
 #define COND_SYS       "sys/"
 #define COND_USR       "usr/"
 
 #define _PATH_COND     _PATH_VARRUN COND_BASE "/"
 #define _PATH_CONDDEV  _PATH_COND   COND_DEV
+#define _PATH_CONDDRIVER _PATH_COND COND_DRIVER
+#define _PATH_CONDCLASS _PATH_COND  COND_CLASS
 #define _PATH_CONDPID  _PATH_COND   COND_PID
 #define _PATH_CONDSYS  _PATH_COND   COND_SYS
 #define _PATH_CONDUSR  _PATH_COND   COND_USR

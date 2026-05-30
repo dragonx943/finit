@@ -177,7 +177,8 @@ Built-in Conditions
 
 Finit comes with a set of plugins for conditions:
 
- - `keventd`: provides `<dev/...>` and `<sys/pwr/...>`
+ - `keventd`: provides `<dev/...>`, `<class/...>`, `<driver/...>`, and
+   `<sys/pwr/...>`
  - `devmon` (built-in fallback for `<dev/...>` without keventd)
  - `netlink`: provides `<net/...>`
  - `pidfile`: provides `<pid/...>`
@@ -190,6 +191,11 @@ the corresponding `dev/` condition.  When a device is removed, the
 condition is cleared.  If keventd is not in use (an external device
 manager like udevd is used instead), the `devmon` built-in provides the
 same conditions by monitoring `/dev` and `/dev/dir` with inotify.
+
+keventd also asserts `class/<subsystem>/<name>` for devices that have
+no `/dev` node, e.g. LEDs and DSA switch ports, and `driver/<name>`
+while a driver is bound to at least one device.  See
+[keventd](keventd.md) for details.
 
 The `pidfile` plugin recursively watches `/run/` for PID files created
 by the monitored services, and sets a corresponding condition in the
@@ -234,6 +240,8 @@ Built-in conditions:
 - `usr/foo`
 - `boot/arg`
 - `dev/node` and `dev/dir/node`
+- `class/<subsystem>/<name>`
+- `driver/<name>`
 
 > [!NOTE]
 > Here, `up` means administratively up, the interface flag `IFF_UP`.
