@@ -301,7 +301,7 @@ battery:
 Usage
 -----
 
-    keventd [-cdGhnpv] [-g GROUP] [-r DIR]
+    keventd [-cdGhnpSv] [-g GROUP] [-r DIR] [-t SECONDS]
 
     Options:
       -c        Run coldplug at startup
@@ -310,11 +310,33 @@ Usage
       -G        Disable netlink rebroadcast entirely
       -h        Show help text
       -n        Run in foreground (no daemon)
+      -p        Passive mode: power supply events only
+      -r DIR    Extra rules directory
+      -S        Settle mode: wait for kernel uevent queue to quiet, then exit
+      -t SEC    Settle timeout (default 30s, used with -S)
       -v        Show version
 
 In normal operation, Finit starts keventd automatically via its system
 configuration.  The `-d` flag is useful for debugging device issues --
 it runs keventd in the foreground and logs all received uevents.
+
+`keventd -S` is a one-shot command, not a flag to the running daemon.
+It is the `udevadm settle` equivalent for migration scenarios:
+
+    keventd -S -t 10 && start-graphical-session
+
+It does not talk to the running keventd (or any device manager) -- it
+simply opens `/sys/kernel/uevent_seqnum` and polls until the kernel's
+sequence counter has been stable for 200ms, then exits zero.  After
+the `-t SECONDS` timeout (default 30) it exits non-zero instead.
+Because `uevent_seqnum` is maintained by the kernel itself, `-S` works
+regardless of which device manager is active, or even if none is.
+
+Prefer the condition-based model (`<dev/X>`, `<class/...>`,
+`<driver/...>`) over settle when you control the service definition --
+settle is racy with slow probes that fire after the queue appears
+quiet.  It is provided for legacy boot scripts and init transitions
+where condition wiring isn't feasible.
 
 Debug logging can also be toggled at runtime by sending `SIGUSR1`:
 
