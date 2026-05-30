@@ -41,6 +41,13 @@ texec initctl reload >/dev/null \
     || fail "initctl reload returned non-zero"
 assert "initctl reload ok" 0 -eq 0
 
+# keventd was restarted above and only writes its pidfile once the
+# coldplug queue has drained, so <pid/keventd> asserts a good while
+# after the restart returns.  Let it land before subscribing below,
+# or the monitor catches keventd's ConditionChanged instead of ours
+# and stops, since it waits for exactly one signal.
+retry 'assert_cond pid/keventd' 100 0.1
+
 # A ConditionChanged signal can only originate from Cond1.Set going
 # through finit (the legacy filesystem path doesn't emit signals).
 # So if the monitor sees one, we know initctl cond set was routed
