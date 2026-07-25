@@ -1,4 +1,9 @@
-/* Parser for /etc/finit.conf and /etc/finit.d/<SVC>.conf
+/* Legacy one-liner parser for /etc/finit.conf and the finit.d hierarchy
+ *
+ * NOTE: this parser is frozen at the Finit 4.x feature set.  It is
+ *       kept, indefinitely, for backwards compatibility -- existing
+ *       configurations must keep working.  All new directives and
+ *       options land in the libconfuse-based format, see conf.c
  *
  * Copyright (c) 2012-2025  Joachim Wiberg <troglobit@gmail.com>
  *
@@ -26,7 +31,6 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <string.h>
-#include <sys/inotify.h>
 #include <sys/resource.h>
 #ifdef _LIBITE_LITE
 # include <libite/lite.h>
@@ -35,13 +39,10 @@
 # include <lite/lite.h>
 # include <lite/queue.h>	/* BSD sys/queue.h API */
 #endif
-#include <time.h>
-#include <glob.h>
-
 #include "finit.h"
 #include "cond.h"
 #include "devmon.h"
-#include "iwatch.h"
+#include "legacy.h"
 #include "private.h"
 #include "service.h"
 #include "tty.h"
@@ -109,20 +110,6 @@ int   runparts_sysv;
 char cgroup_current[16];           /* cgroup.NAME sets current cgroup for a set of services */
 char cgroup_settings_current[128]; /* cgroup.system,cpu.weight:500 - cgroup settings */
 int  cgroup_delegate_current;      /* cgroup.system,delegate - delegation flag */
-
-struct conf_change {
-	TAILQ_ENTRY(conf_change) link;
-	char *name;
-};
-
-static struct iwatch iw_conf;
-static int iwatch_fd;
-static uev_t etcw;
-
-static TAILQ_HEAD(, conf_change) conf_change_list = TAILQ_HEAD_INITIALIZER(conf_change_list);
-
-static int  parse_conf(char *file, int is_rcsd);
-static void drop_changes(void);
 
 static int get_bool(char *arg, int default_value)
 {
@@ -581,7 +568,7 @@ char *conf_parse_env(char *line, char **value)
  * from finit.conf, or other .conf file.  Note, PATH is always reset in
  * the conf_reset_env() function.
  */
-static void parse_env(char *line)
+void legacy_parse_env(char *line)
 {
 	struct env_entry *node;
 	char *key, *val;
@@ -630,7 +617,7 @@ static int kmod_exists(char *mod)
 	return found;
 }
 
-static void kmod_load(char *mod)
+void kmod_load(char *mod)
 {
 	char module[64] = { 0 };
 	char cmd[CMD_SIZE];
@@ -963,7 +950,7 @@ static int parse_static(char *line, int is_rcsd)
 	}
 
 	if (BOOTSTRAP && MATCH_CMD(line, "set ", x)) {
-		parse_env(x);
+		legacy_parse_env(x);
 		return 0;
 	}
 
@@ -976,7 +963,7 @@ static int parse_static(char *line, int is_rcsd)
 			return 1;
 		}
 
-		return parse_conf(cmd, is_rcsd);
+		return conf_parse_file(cmd, is_rcsd);
 	}
 
 	if (MATCH_CMD(line, "log ", x)) {
@@ -1214,7 +1201,7 @@ static int is_template(const char *file, char *name, size_t len)
 	return 1;		/* instantiated template */
 }
 
-static int parse_conf(char *file, int is_rcsd)
+int legacy_parse_conf(char *file, int is_rcsd)
 {
 	struct rlimit rlimit[RLIMIT_NLIMITS];
 	char name[65] = { 0 };
@@ -1256,509 +1243,12 @@ static int parse_conf(char *file, int is_rcsd)
 		else if (!parse_dynamic(line, is_rcsd ? rlimit : global_rlimit, file))
 			;
 		else
-			parse_env(line);
+			legacy_parse_env(line);
 
 		free(line);
 	}
 
 	fclose(fp);
-
-	return 0;
-}
-
-static void glob_append(glob_t *gl, int append, const char *fmt, ...)
-{
-	va_list ap;
-	size_t len;
-	char *path;
-
-	va_start(ap, fmt);
-	len = vsnprintf(NULL, 0, fmt, ap);
-	va_end(ap);
-
-	path = alloca(++len);
-	if (!path) {
-		warn("failed alloca() in glob_append()");
-		return;
-	}
-
-	va_start(ap, fmt);
-	vsnprintf(path, len, fmt, ap);
-	va_end(ap);
-
-	dbg("conf_reload(): glob %s ...", path);
-	glob(path, append ? GLOB_APPEND : 0, NULL, gl);
-}
-
-/*
- * Reload /etc/finit.conf and all *.conf in /etc/finit.d/
- */
-int conf_reload(void)
-{
-	glob_t gl;
-	size_t i;
-
-	/* Set time according to current time zone */
-	tzset();
-	dbg("Set time  daylight: %d  timezone: %ld  tzname: %s %s",
-	   daylight, timezone, tzname[0], tzname[1]);
-
-	/* Mark and sweep */
-	cgroup_mark_all();
-	svc_mark_dynamic();
-	conf_reset_env();
-
-	/*
-	 * Reset global rlimit to bootstrap values from conf_init().
-	 */
-	memcpy(global_rlimit, initial_rlimit, sizeof(global_rlimit));
-
-	/*
-	 * When built with --disable-rescue mode many other 'if (rescue)'
-	 * code paths are #ifdeffed out.  This one, and the ones in the
-	 * plugins, are not because a hook or plugin can still trigger
-	 * the alternative rescue.conf instead of finit.conf.  This for
-	 * very advanced use-cases where files on /etc are generated at
-	 * bootstrap, including users and passwords, from other sources.
-	 */
-	if (rescue) {
-		int rc;
-		char line[80] = "tty [12345789] rescue";
-
-		/* If rescue.conf is missing, fall back to a root shell */
-		rc = parse_conf(RESCUE_CONF, 0);
-		if (rc)
-			service_register(SVC_TYPE_TTY, line, global_rlimit, NULL);
-
-		print(rc, "Entering rescue mode");
-		goto done;
-	}
-
-	/* First, read /etc/finit.conf */
-	parse_conf(finit_conf, 0);
-
-	/* Set global limits */
-	for (int i = 0; i < RLIMIT_NLIMITS; i++) {
-		if (setrlimit(i, &global_rlimit[i]) == -1)
-			logit(LOG_WARNING, "rlimit: Failed setting %s: %s",
-			      rlim2str(i), lim2str(&global_rlimit[i]));
-	}
-
-	/*
-	 * Next, read all *.conf in /lib/finit/system and /etc/finit.d/
-	 * The system files were previously created at runtime by plugins
-	 * but are now regular files that can be overridden by files in
-	 * /etc/finit.d -- similar to how tmfiles.d(5) work.  E.g., add
-	 * an override .conf, or an ignore by symlinking to /dev/null
-	 *
-	 * The .conf files (and run/task/service stanzas) are parsed and
-	 * started in order.  Each directory is sorted alphanumerically
-	 * and then the result is appended to the overall order:
-	 *
-	 *     /lib/finit/system/10-hotplug.conf
-	 *     /lib/finit/system/90-testserv.conf
-	 *     /run/finit/system/dbus.conf
-	 *     /run/finit/system/tty.conf
-	 *     /etc/finit.d/10-abc.conf
-	 *     /etc/finit.d/20-abc.conf
-	 *     /etc/finit.d/enabled/1-aaa.conf
-	 *     /etc/finit.d/enabled/1-abc.conf
-	 *     /etc/finit.d/enabled/2-aaa.conf
-	 */
-	glob_append(&gl, 0, "%s/*.conf", FINIT_SYSPATH_);
-	glob_append(&gl, 1, "%s/*.conf", FINIT_RUNPATH_);
-	glob_append(&gl, 1, "%s/*.conf", finit_rcsd);
-	glob_append(&gl, 1, "%s/enabled/*.conf", finit_rcsd);
-
-	if (bootstrap) {
-		const char *fn = _PATH_VARRUN "finit/conf.order";
-		FILE *fp;
-
-		fp = fopen(fn, "w");
-		if (!fp) {
-			err(1, "failed creating %s", fn);
-		} else {
-			fprintf(fp, "# Evaluation & execution order of .conf files\n");
-			for (i = 0; i < gl.gl_pathc; i++)
-				fprintf(fp, "%s\n", gl.gl_pathv[i]);
-			fclose(fp);
-		}
-	}
-
-	for (i = 0; i < gl.gl_pathc; i++) {
-		char *path = gl.gl_pathv[i];
-		char *rp = NULL;
-		struct stat st;
-		size_t j, len;
-
-		/* check for FINIT_SYSPATH_ or FINIT_RUNPATH_ overrides */
-		for (j = i + 1; j < gl.gl_pathc; j++) {
-			if (strncmp(path, FINIT_SYSPATH_, strlen(FINIT_SYSPATH_)) &&
-			    strncmp(path, FINIT_RUNPATH_, strlen(FINIT_RUNPATH_)))
-				continue;
-			if (strcmp(basenm(path), basenm(gl.gl_pathv[j])))
-				continue;
-			path = NULL; /* replacement later in list, skip this */
-			break;
-		}
-
-		if (!path)
-			continue; /* skip, override exists */
-
-		/* Check that it's an actual file ... beyond any symlinks */
-		if (lstat(path, &st)) {
-			dbg("Skipping %s, cannot access: %s", path, strerror(errno));
-			continue;
-		}
-
-		/* Skip directories */
-		if (S_ISDIR(st.st_mode)) {
-			dbg("Skipping directory %s", path);
-			continue;
-		}
-
-		/* Check for dangling symlinks */
-		if (S_ISLNK(st.st_mode)) {
-			rp = realpath(path, NULL);
-			if (!rp) {
-				logit(LOG_WARNING, "Skipping %s, dangling symlink: %s", path, strerror(errno));
-				continue;
-			}
-		}
-
-		/* Check that file ends with '.conf' */
-		len = strlen(path);
-		if (len < 6 || strcmp(&path[len - 5], ".conf"))
-			dbg("Skipping %s, not a Finit .conf file ... ", path);
-		else
-			parse_conf(path, 1);
-
-		if (rp)
-			free(rp);
-	}
-
-	globfree(&gl);
-
-	/* Mark any reverse deps as chenaged. */
-	service_update_rdeps();
-
-	/* Prune according to if:[!]ident or if:<[!]cond> */
-	service_mark_unavail();
-
-	/* Set up top-level cgroups */
-	cgroup_config();
-done:
-	/* Remove all unused top-level cgroups */
-	cgroup_cleanup();
-
-	/* Drop record of all .conf changes */
-	drop_changes();
-
-	if (bootstrap)
-		wdog = svc_find("watchdog", "finit");
-
-	/* Override configured runlevel, user said 'S' on /proc/cmdline */
-	if (BOOTSTRAP && single)
-		cfglevel = 1;
-
-	/*
-	 * Set host name, from %DEFHOST, *.conf or /etc/hostname.  The
-	 * latter wins, if neither exists we default to "noname"
-	 */
-	set_hostname(&hostname);
-
-	return 0;
-}
-
-static struct conf_change *conf_find(char *file)
-{
-	struct conf_change *node, *tmp;
-
-	TAILQ_FOREACH_SAFE(node, &conf_change_list, link, tmp) {
-		if (string_compare(node->name, file))
-			return node;
-	}
-
-	return NULL;
-}
-
-static void drop_change(struct conf_change *node)
-{
-	if (!node)
-		return;
-
-	TAILQ_REMOVE(&conf_change_list, node, link);
-	free(node->name);
-	free(node);
-}
-
-
-static void drop_changes(void)
-{
-	struct conf_change *node, *tmp;
-
-	TAILQ_FOREACH_SAFE(node, &conf_change_list, link, tmp)
-		drop_change(node);
-}
-
-static int conf_change_act(char *dir, char *name, uint32_t mask)
-{
-	char fn[strlen(dir) + strlen(name) + 2];
-	struct conf_change *node;
-	char *rp = NULL;
-
-	/* Check for actual printable characters, sometimes STX */
-	if (name[0] && name[0] >= ' ')
-		paste(fn, sizeof(fn), dir, name);
-	else
-		strlcpy(fn, dir, sizeof(fn));
-	dbg("path: %s mask: %08x", fn, mask);
-
-	if (strchr(name, '@')) {
-		/* Skip realpath for templates */
-		rp = strdup(fn);
-	} else {
-		/* Handle disabling/removal of service */
-		rp = realpath(fn, NULL);
-		if (!rp) {
-			if (errno != ENOENT)
-				goto fail;
-			rp = strdup(fn);
-		}
-	}
-
-	if (!rp)
-		goto fail;
-
-	node = conf_find(rp);
-	if (node) {
-		dbg("event already registered for %s ...", name);
-		free(rp);
-		return 0;
-	}
-
-	node = malloc(sizeof(*node));
-	if (!node) {
-		free(rp);
-		goto fail;
-	}
-
-	node->name = rp;
-	TAILQ_INSERT_HEAD(&conf_change_list, node, link);
-	dbg("event registered for %s, mask 0x%x", rp, mask);
-	return 0;
-fail:
-	warn("failed registering %s event mask %08x", fn, mask);
-	return 1;
-}
-
-int conf_any_change(void)
-{
-	if (TAILQ_EMPTY(&conf_change_list))
-		return 0;
-
-	return 1;
-}
-
-int conf_changed(char *file)
-{
-	int rc = 0;
-	char *rp;
-
-	if (!file)
-		return 0;
-
-	if (strchr(file, '@'))
-		rp = strdup(file);
-	else
-		rp = realpath(file, NULL);
-
-	if (!rp)
-		return 0;
-
-	if (conf_find(rp))
-		rc = 1;
-	free(rp);
-
-	return rc;
-}
-
-static int conf_iwatch_read(int fd)
-{
-	static char ev_buf[8 *(sizeof(struct inotify_event) + NAME_MAX + 1) + 1];
-	struct inotify_event *ev;
-	ssize_t sz;
-	size_t off;
-
-	sz = read(fd, ev_buf, sizeof(ev_buf) - 1);
-	if (sz <= 0)
-		return -1;
-	ev_buf[sz] = 0;
-
-	for (off = 0; off < (size_t)sz; off += sizeof(*ev) + ev->len) {
-		struct iwatch_path *iwp;
-
-		if (off + sizeof(*ev) > (size_t)sz)
-			break;
-
-		ev = (struct inotify_event *)&ev_buf[off];
-		if (off + sizeof(*ev) + ev->len > (size_t)sz)
-			break;
-
-		if (!ev->mask)
-			continue;
-
-		dbg("name %s, event: 0x%08x", ev->name, ev->mask);
-
-		/* Find base path for this event */
-		iwp = iwatch_find_by_wd(&iw_conf, ev->wd);
-		if (!iwp)
-			continue;
-
-		if (conf_change_act(iwp->path, ev->name, ev->mask))
-			break;
-	}
-
-	return 0;
-}
-
-static void conf_cb(uev_t *w, void *arg, int events)
-{
-	(void)arg;
-
-	if (UEV_ERROR == events) {
-		dbg("%s(): iwatch socket %d invalid.", __func__, w->fd);
-		return;
-	}
-
-	if (conf_iwatch_read(w->fd)) {
-		err(1, "invalid inotify event");
-		return;
-	}
-
-
-#ifdef AUTO_RELOAD
-	if (conf_any_change())
-		sm_reload();
-#endif
-}
-
-void conf_flush_events(void)
-{
-	while (!conf_iwatch_read(iwatch_fd))
-		dbg("emptying inotify queue ...");
-}
-
-/*
- * Set up inotify watcher and load all *.conf in /etc/finit.d/
- */
-int conf_monitor(void)
-{
-	char path[strlen(finit_rcsd) + 16];
-	int rc = 0;
-
-	/*
-	 * If only one watcher fails, that's OK.  A user may have only
-	 * one of /etc/finit.conf or /etc/finit.d in use, and may also
-	 * have or not have symlinks in place.  We need to monitor for
-	 * changes to either symlink or target.
-	 */
-	rc |= iwatch_add(&iw_conf, finit_rcsd, IN_ONLYDIR);
-	snprintf(path, sizeof(path), "%s/available/", finit_rcsd);
-	rc |= iwatch_add(&iw_conf, path, IN_ONLYDIR | IN_DONT_FOLLOW);
-	snprintf(path, sizeof(path), "%s/enabled/", finit_rcsd);
-	rc |= iwatch_add(&iw_conf, path, IN_ONLYDIR | IN_DONT_FOLLOW);
-	rc |= iwatch_add(&iw_conf, finit_conf, 0);
-
-	/*
-	 * Systems with /etc/default, /etc/conf.d, or similar, can also
-	 * monitor changes in env files sourced by .conf files (above)
-	 * define your own with --with-sysconfig=/path/to/envfiles
-	 */
-	rc |= iwatch_add(&iw_conf, "/etc/default/", IN_ONLYDIR);
-	rc |= iwatch_add(&iw_conf, "/etc/conf.d/", IN_ONLYDIR);
-#ifdef FINIT_SYSCONFIG
-	rc |= iwatch_add(&iw_conf, FINIT_SYSCONFIG, IN_ONLYDIR);
-#endif
-	rc |= conf_reload();
-
-	return rc;
-}
-
-/*
- * Prepare .conf parser and load /etc/finit.conf for global settings
- */
-int conf_init(uev_ctx_t *ctx)
-{
-	/* default hostname */
-	hostname = strdup(DEFHOST);
-
-	/*
-	 * Get current global limits, which may be overridden from both
-         * finit.conf, for Finit and its services like getty+watchdogd,
-         * and *.conf in finit.d/, for each service(s) listed there.
-         */
-        for (int i = 0; i < RLIMIT_NLIMITS; i++) {
-                if (getrlimit(i, &initial_rlimit[i]))
-			logit(LOG_WARNING, "rlimit: Failed reading setting %s: %s",
-			      rlim2str(i), strerror(errno));
-	}
-
-	/* Initialize global rlimits, e.g. for built-in services */
-	memcpy(global_rlimit, initial_rlimit, sizeof(global_rlimit));
-
-	/*
-	 * Start built-in watchdogd as soon as possible, if enabled
-	 */
-#ifdef WDT_DEVNODE
-	if (whichp(FINIT_EXECPATH_ "/watchdogd") && fexist(WDT_DEVNODE)) {
-		conf_save_service(SVC_TYPE_SERVICE, "[S0123456789] cgroup.init notify:none name:watchdog :finit "
-				  FINIT_EXECPATH_ "/watchdogd -- Finit watchdog daemon", "watchdogd.conf");
-	}
-#endif
-	/*
-	 * Start kernel event daemon as soon as possible, if enabled
-	 */
-	if (whichp(FINIT_EXECPATH_ "/keventd"))
-		conf_save_service(SVC_TYPE_SERVICE, "[S12345789] cgroup.init notify:none "
-				  FINIT_EXECPATH_ "/keventd -- Finit kernel event daemon", "keventd.conf");
-
-	dbg("Allow plugins to register early runlevel 1 run/task/services ...");
-	plugin_run_hooks(HOOK_SVC_PLUGIN);
-
-	/* Read global rlimits and global cgroup setup from /etc/finit.conf */
-	parse_conf(finit_conf, 0);
-
-	/* prepare /etc watcher */
-	iwatch_fd = iwatch_init(&iw_conf);
-	if (iwatch_fd < 0)
-		return 1;
-
-	if (uev_io_init(ctx, &etcw, conf_cb, NULL, iwatch_fd, UEV_READ)) {
-		err(1, "Failed setting up I/O callback for /etc watcher");
-		close(iwatch_fd);
-		return 1;
-	}
-
-	/*
-	 * Background startup scripts in the runparts directory, if any.
-	 */
-	if (runparts && fisdir(runparts) && !rescue) {
-		char conf[sizeof(_PATH_RUNPARTS) + strlen(runparts) + 100];
-		char args[10] = { 0 };
-
-		if (debug)
-			strlcat(args, "-d ", sizeof(args));
-		if (runparts_progress)
-			strlcat(args, "-p ", sizeof(args));
-		if (runparts_sysv)
-			strlcat(args, "-s ", sizeof(args));
-
-		snprintf(conf, sizeof(conf), "[S] <int/bootstrap> notify:none log:console %s %s %s"
-			 " -- Calling runparts %s in the background",
-			 _PATH_RUNPARTS, args, runparts, runparts);
-		conf_save_service(SVC_TYPE_TASK, conf, "runparts.conf");
-	}
 
 	return 0;
 }

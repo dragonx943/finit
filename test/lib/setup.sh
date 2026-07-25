@@ -26,6 +26,11 @@ assert_file_contains()
 	assert "File $1 contains the string $2" "$(texec grep "$2" "$1")"
 }
 
+assert_file_exists()
+{
+	assert "File $1 exists" "$(texec ls "$1")"
+}
+
 assert_num_children()
 {
 	assert "$1 services are running" "$(texec pgrep -P 1 "$2" | wc -l)" -eq "$1"

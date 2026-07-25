@@ -49,7 +49,7 @@ extern char *osheading;
 extern int logfile_size_max;
 extern int logfile_count_max;
 
-extern struct rlimit global_rlimit[];
+extern struct rlimit global_rlimit[RLIMIT_NLIMITS];
 extern char cgroup_current[];
 extern char cgroup_settings_current[];
 extern int  cgroup_delegate_current;
@@ -58,7 +58,7 @@ int   str2rlim(char *str);
 char *rlim2str(int rlim);
 
 int  conf_init            (uev_ctx_t *ctx);
-void conf_reload          (void);
+int  conf_reload          (void);
 int  conf_any_change      (void);
 int  conf_changed         (char *file);
 int  conf_monitor         (void);
