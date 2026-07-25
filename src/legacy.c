@@ -41,6 +41,7 @@
 #endif
 #include "finit.h"
 #include "cond.h"
+#include "conf.h"
 #include "devmon.h"
 #include "legacy.h"
 #include "private.h"
@@ -51,65 +52,11 @@
 
 #define BOOTSTRAP (runlevel == INIT_LEVEL)
 
-int   runlevel  = INIT_LEVEL;	/* Bootstrap 'S' */
-int   cfglevel  = RUNLEVEL;	/* Fallback if no configured runlevel */
-int   cmdlevel  = 0;		/* runlevel override from cmdline */
-int   prevlevel = -1;
-int   debug     = 0;		/* debug mode from kernel cmdline */
-int   rescue    = 0;		/* rescue mode from kernel cmdline */
-int   single    = 0;		/* single user mode from kernel cmdline */
-int   bootstrap = 1;		/* set while bootstrapping (for TTYs) */
-int   kerndebug = 0;		/* set if /proc/sys/kernel/printk > 7 */
-int   syncsec   = 0;		/* reboot delay */
-int   wdtreboot = 0;		/* reboot via watchdog, default: SOC */
-int   readiness = SVC_NOTIFY_PID;
-char *finit_conf= NULL;
-char *finit_rcsd= NULL;
-char *fstab     = NULL;
-char *sdown     = NULL;
-char *network   = NULL;
-char *hostname  = NULL;
-char *osheading = NULL;
-
-int logfile_size_max = 200000;	/* 200 kB */
-int logfile_count_max = 5;
-
 struct env_entry {
 	TAILQ_ENTRY(env_entry) link;
 	char *name;
 };
 static TAILQ_HEAD(, env_entry) env_list = TAILQ_HEAD_INITIALIZER(env_list);
-
-struct rlimit initial_rlimit[RLIMIT_NLIMITS];
-struct rlimit global_rlimit[RLIMIT_NLIMITS];
-
-/*
- * --enable-fastboot => fsck_mode: NULL => no fsck by default
- * --enable-fsckfix  => fsck_mode: "-f" + fsck_repair: "y"
- */
-#ifdef FSCK_FIX
-# ifdef FAST_BOOT
-char *fsck_mode = NULL;
-# else
-char *fsck_mode = "-f";
-# endif
-char *fsck_repair = "-y";
-#else
-# ifdef FAST_BOOT
-char *fsck_mode = NULL;
-# else
-char *fsck_mode = "";
-# endif
-char *fsck_repair = "-p";
-#endif
-
-char *runparts = NULL;
-int   runparts_progress;
-int   runparts_sysv;
-
-char cgroup_current[16];           /* cgroup.NAME sets current cgroup for a set of services */
-char cgroup_settings_current[128]; /* cgroup.system,cpu.weight:500 - cgroup settings */
-int  cgroup_delegate_current;      /* cgroup.system,delegate - delegation flag */
 
 static int get_bool(char *arg, int default_value)
 {

@@ -68,6 +68,37 @@
 
 #define BOOTSTRAP (runlevel == INIT_LEVEL)
 
+int   runlevel  = INIT_LEVEL;	/* Bootstrap 'S' */
+int   cfglevel  = RUNLEVEL;	/* Fallback if no configured runlevel */
+int   cmdlevel  = 0;		/* runlevel override from cmdline */
+int   prevlevel = -1;
+int   debug     = 0;		/* debug mode from kernel cmdline */
+int   rescue    = 0;		/* rescue mode from kernel cmdline */
+int   single    = 0;		/* single user mode from kernel cmdline */
+int   bootstrap = 1;		/* set while bootstrapping (for TTYs) */
+int   kerndebug = 0;		/* set if /proc/sys/kernel/printk > 7 */
+int   syncsec   = 0;		/* reboot delay */
+int   wdtreboot = 0;		/* reboot via watchdog, default: SOC */
+int   readiness = SVC_NOTIFY_PID;
+char *finit_conf= NULL;
+char *finit_rcsd= NULL;
+char *fstab     = NULL;
+char *sdown     = NULL;
+char *network   = NULL;
+char *hostname  = NULL;
+char *osheading = NULL;
+
+char *runparts = NULL;
+int   runparts_progress;
+int   runparts_sysv;
+
+char cgroup_current[CGROUP_NAME_SIZE];              /* cgroup.NAME sets current cgroup for a set of services */
+char cgroup_settings_current[CGROUP_SETTINGS_SIZE]; /* cgroup.system,cpu.weight:500 - cgroup settings */
+int  cgroup_delegate_current;                       /* cgroup.system,delegate - delegation flag */
+
+struct rlimit initial_rlimit[RLIMIT_NLIMITS];
+struct rlimit global_rlimit[RLIMIT_NLIMITS];
+
 struct conf_change {
 	TAILQ_ENTRY(conf_change) link;
 	char *name;

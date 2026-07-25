@@ -49,9 +49,12 @@ extern char *osheading;
 extern int logfile_size_max;
 extern int logfile_count_max;
 
+#define CGROUP_NAME_SIZE     16
+#define CGROUP_SETTINGS_SIZE 128
+
 extern struct rlimit global_rlimit[RLIMIT_NLIMITS];
-extern char cgroup_current[];
-extern char cgroup_settings_current[];
+extern char cgroup_current[CGROUP_NAME_SIZE];
+extern char cgroup_settings_current[CGROUP_SETTINGS_SIZE];
 extern int  cgroup_delegate_current;
 
 int   str2rlim(char *str);

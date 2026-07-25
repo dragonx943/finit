@@ -66,6 +66,8 @@
 
 #define NOTIFY_PATH "@run/finit/notify/%d"
 
+int logfile_size_max = 200000;	/* 200 kB */
+int logfile_count_max = 5;
 
 /*
  * run tasks block other tasks/services from starting, we track the
