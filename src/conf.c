@@ -1526,6 +1526,105 @@ static int conf_parse_cfg(cfg_t *cfg, char *file, int is_rcsd)
 }
 
 /*
+ * Substitute every %i in LINE with NAME, for template instantiation.
+ *
+ * Very simple and crude implementation, only supports '%i'
+ */
+static char *conf_instantiate(char *line, char *name)
+{
+	char *ptr, *end = strchr(line, 0);
+	char *pos = line;
+	size_t num = 0;
+
+	if (!name[0] || !end)
+		return line;
+
+	while ((ptr = strchr(pos, '%'))) {
+		num++;
+		pos = ptr + 1;
+	}
+
+	ptr = realloc(line, strlen(line) + num * strlen(name) + 1);
+	if (!ptr)
+		return line;
+
+	pos = line = ptr;
+	while ((ptr = strchr(pos, '%'))) {
+		if (!strncmp(ptr, "%i", 2)) {
+			char *rest = &ptr[2];
+			char *next = ptr + strlen(name);
+
+			memmove(next, rest, strlen(rest) + 1);
+			memcpy(ptr, name, strlen(name));
+
+			pos += strlen(name);
+		} else
+			pos++;
+	}
+
+	return line;
+}
+
+static int conf_is_template(const char *file, char *name, size_t len)
+{
+	char *ptr, *nm;
+	size_t i = 0;
+
+	/* the @ convention names the file, a directory may contain one */
+	ptr = strchr(basenm((char *)file), '@');
+	if (!ptr)
+		return 0;	/* not a template */
+
+	nm = ptr + 1;
+	ptr = strstr(nm, ".conf");
+	if (!strcmp(nm, ".conf") || !ptr)
+		return 1;	/* template itself or invalid */
+
+	if (!name)
+		return 1;
+
+	while (nm < ptr && i < len - 1)
+		name[i++] = *nm++;
+	name[i] = 0;
+
+	return 1;		/* instantiated template */
+}
+
+/*
+ * Parse from FILE, or from BUF when it is set, i.e. for a template
+ * whose %i has already been substituted.
+ *
+ * XXX: Workaround for libConfuse <3.4, whose cfg_parse_buf() replaces
+ *      cfg->filename with "[buf]", so every diagnostic from a template
+ *      would lose the file name.  cfg_parse_fp() keeps a name the
+ *      caller has already set, so go through fmemopen() instead.  With
+ *      a 3.4 floor this is just cfg_parse_buf(cfg, buf).
+ */
+static int conf_parse_any(cfg_t *cfg, char *file, char *buf)
+{
+	FILE *fp;
+	int rc;
+
+	if (!buf)
+		return cfg_parse(cfg, file);
+
+	/* fmemopen() rejects a zero length on older GLIBC */
+	if (!buf[0])
+		return CFG_SUCCESS;
+
+	fp = fmemopen(buf, strlen(buf), "r");
+	if (!fp)
+		return CFG_FILE_ERROR;
+
+	/* cfg_parse_fp() only names the stream when we have not */
+	cfg->filename = strdup(file);
+	rc = cfg_parse_fp(cfg, fp);
+	fclose(fp);
+
+	return rc;
+}
+
+/*
  * Is this a new-format file, or a legacy one?
  *
  * Called only after a strict parse has already failed, to tell a
@@ -1539,7 +1638,7 @@ static int conf_parse_cfg(cfg_t *cfg, char *file, int is_rcsd)
  * creating them, so a lenient tree is missing every set{} variable
  * and every free-form cgroup key.
  */
-static int is_new_format(char *file)
+static int is_new_format(char *file, char *buf)
 {
 	cfg_t *cfg;
 	int rc;
@@ -1549,10 +1648,42 @@ static int is_new_format(char *file)
 		return 0;
 
 	cfg_set_error_function(cfg, cfg_error_quiet);
-	rc = cfg_parse(cfg, file);
+	rc = conf_parse_any(cfg, file, buf);
 	cfg_free(cfg);
 
 	return rc == CFG_SUCCESS;
+}
+
+/*
+ * Read FILE and substitute %i with NAME, for template instantiation.
+ * Returns a malloc()'ed buffer the caller frees.
+ */
+static char *conf_read_template(char *file, char *name)
+{
+	struct stat st;
+	char *buf = NULL;
+	size_t len;
+	FILE *fp;
+
+	fp = fopen(file, "r");
+	if (!fp)
+		return NULL;
+
+	/* fstat() the open fd, no window for the file to change under us */
+	if (fstat(fileno(fp), &st) || st.st_size < 0)
+		goto out;
+
+	buf = malloc((size_t)st.st_size + 1);
+	if (!buf)
+		goto out;
+
+	len = fread(buf, 1, (size_t)st.st_size, fp);
+	buf[len] = 0;
+	buf = conf_instantiate(buf, name);
+out:
+	fclose(fp);
+
+	return buf;
 }
 
 /*
@@ -1562,43 +1693,63 @@ static int is_new_format(char *file)
  */
 int conf_parse_file(char *file, int is_rcsd)
 {
+	char name[MAX_ID_LEN] = { 0 };
+	char *buf = NULL;
 	cfg_t *cfg;
 	int rc;
 
 	/*
-	 * Template files (name@.conf, name@id.conf): %i instantiation
-	 * for the new format is not yet supported, so these bypass
-	 * detection entirely and go to the legacy parser, which handles
-	 * templates per line.  See issue #148.
+	 * Template files (name@.conf, name@id.conf).  A bare name@.conf
+	 * is the template itself, there is nothing to instantiate from
+	 * it.  Otherwise %i is substituted over the whole file up front,
+	 * so both the format detection below and, on fallback, the
+	 * legacy parser see the finished text.
 	 */
-	if (strchr(basenm(file), '@'))
-		return legacy_parse_conf(file, is_rcsd);
+	if (conf_is_template(file, name, sizeof(name))) {
+		if (!name[0]) {
+			dbg("*** Skipping template file %s", file);
+			return 0;
+		}
+
+		dbg("*** instantiating %s from %s ...", name, file);
+		buf = conf_read_template(file, name);
+		if (!buf)
+			return 1;
+	}
 
 	cfg = cfg_init(conf_opts, CFGF_NONE);
-	if (!cfg)
-		return legacy_parse_conf(file, is_rcsd);
+	if (!cfg) {
+		rc = legacy_parse_conf(file, buf, is_rcsd);
+		goto done;
+	}
 
 	cfg_set_error_function(cfg, cfg_error_cb);
-	rc = cfg_parse(cfg, file);
+	rc = conf_parse_any(cfg, file, buf);
 	if (rc == CFG_SUCCESS) {
 		dbg("*** Parsing %s (new format)", file);
 		rc = conf_parse_cfg(cfg, file, is_rcsd);
 		cfg_free(cfg);
-		return rc;
+		goto done;
 	}
 	cfg_free(cfg);
 
-	if (rc == CFG_FILE_ERROR)
-		return 1;	/* like legacy fopen() failure */
+	if (rc == CFG_FILE_ERROR) {
+		rc = 1;		/* like legacy fopen() failure */
+		goto done;
+	}
 
-	if (is_new_format(file)) {
+	if (is_new_format(file, buf)) {
 		logit(LOG_ERR, "parse error: %s", cfg_errmsg);
-		return 1;
+		rc = 1;
+		goto done;
 	}
 
 	dbg("not in new format (%s), falling back to legacy parser", cfg_errmsg);
+	rc = legacy_parse_conf(file, buf, is_rcsd);
+done:
+	free(buf);
 
-	return legacy_parse_conf(file, is_rcsd);
+	return rc;
 }
 
 static void glob_append(glob_t *gl, int append, const char *fmt, ...)
@@ -1849,7 +2000,7 @@ static int conf_change_act(char *dir, char *name, uint32_t mask)
 		strlcpy(fn, dir, sizeof(fn));
 	dbg("path: %s mask: %08x", fn, mask);
 
-	if (strchr(name, '@')) {
+	if (conf_is_template(name, NULL, 0)) {
 		/* Skip realpath for templates */
 		rp = strdup(fn);
 	} else {
@@ -1903,7 +2054,7 @@ int conf_changed(char *file)
 	if (!file)
 		return 0;
 
-	if (strchr(file, '@'))
+	if (conf_is_template(file, NULL, 0))
 		rp = strdup(file);
 	else
 		rp = realpath(file, NULL);

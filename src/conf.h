@@ -83,6 +83,7 @@ int   conf_parse_runlevels (const char *runlevels);
 void  conf_parse_cond      (svc_t *svc, char *cond);
 int   conf_parse_file      (char *file, int is_rcsd);
 
+
 #endif	/* FINIT_CONF_H_ */
 
 /**

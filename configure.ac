@@ -50,9 +50,11 @@ PKG_PROG_PKG_CONFIG
 # Check for required libraries
 PKG_CHECK_MODULES([uev],  [libuev >= 2.4.1])
 PKG_CHECK_MODULES([lite], [libite >= 2.6.1])
-# 3.3 is the floor: CFGF_KEYSTRVAL, which set {} and the free-form
-# cgroup keys are built on, does not exist before it.  3.3 parses both
-# correctly, see the XXX in src/conf.c before raising this to 3.4.
+# 3.3 is the floor: CFGF_KEYSTRVAL, which environment {} and the
+# free-form cgroup keys are built on, does not exist before it.  3.3
+# parses both correctly.  Two workarounds hang off this number, the
+# spurious KEYSTRVAL warning and cfg_parse_buf() losing the file name
+# of a template; grep the XXX notes in src/conf.c before raising it.
 PKG_CHECK_MODULES([confuse], [libconfuse >= 3.3])
 
 # Check for configured Finit features
