@@ -221,9 +221,11 @@ typedef struct svc {
 
 	/* When set, used instead of SIGHUP or stop-start */
 	char	       reload_script[MAX_CMD_LEN];
+	int	       reload_tmo;
 
 	/* When set, used instead of SIGTERM or sysv 'stop' */
 	char	       stop_script[MAX_CMD_LEN];
+	int	       stop_tmo;
 
 	/*
 	 * Used to forcefully kill services that won't shutdown on

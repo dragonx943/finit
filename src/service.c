@@ -1076,7 +1076,7 @@ static void service_kill(svc_t *svc)
  * Called by service_stop() and service_reload() when alternate mechanisms
  * for stopping and reloading have been specified by the user.
  */
-static int service_run_script(svc_t *svc, char *script)
+static int service_run_script(svc_t *svc, char *script, int tmo)
 {
 	const char *id = svc_ident(svc, NULL, 0);
 	pid_t pid = service_fork(svc);
@@ -1106,7 +1106,7 @@ static int service_run_script(svc_t *svc, char *script)
 	}
 
 	dbg("%s: script '%s' started as PID %d", id, script, pid);
-	return service_script_add(svc, pid, svc->killdelay);
+	return service_script_add(svc, pid, tmo ? tmo : svc->killdelay);
 }
 
 /* Ensure we don't have any notify socket lingering */
@@ -1268,7 +1268,7 @@ int service_stop(svc_t *svc)
 		print_desc("Stopping ", svc->desc);
 
 	if (svc->stop_script[0]) {
-		rc = service_run_script(svc, svc->stop_script);
+		rc = service_run_script(svc, svc->stop_script, svc->stop_tmo);
 	} else if (!svc_is_sysv(svc)) {
 		if (svc->pid > 1) {
 			/*
@@ -1360,7 +1360,7 @@ static int service_reload(svc_t *svc)
 
 	if (svc->reload_script[0]) {
 		logit(LOG_CONSOLE | LOG_NOTICE, "Reloading %s[%d], calling reload:%s ...", id, svc->pid, svc->reload_script);
-		rc = service_run_script(svc, svc->reload_script);
+		rc = service_run_script(svc, svc->reload_script, svc->reload_tmo);
 	} else 	if (svc->sighup) {
 		if (svc->pid <= 1) {
 			dbg("%s[%d]: bad PID, cannot reload service", id, svc->pid);
@@ -2211,12 +2211,12 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		memset(svc->cleanup_script, 0, sizeof(svc->cleanup_script));
 
 	if (reload_script)
-		parse_script(svc, "reload", reload_script, NULL, svc->reload_script, sizeof(svc->reload_script));
+		parse_script(svc, "reload", reload_script, &svc->reload_tmo, svc->reload_script, sizeof(svc->reload_script));
 	else
 		memset(svc->reload_script, 0, sizeof(svc->reload_script));
 
 	if (stop_script)
-		parse_script(svc, "stop", stop_script, NULL, svc->stop_script, sizeof(svc->stop_script));
+		parse_script(svc, "stop", stop_script, &svc->stop_tmo, svc->stop_script, sizeof(svc->stop_script));
 	else
 		memset(svc->stop_script, 0, sizeof(svc->stop_script));
 
