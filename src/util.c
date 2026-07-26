@@ -43,8 +43,9 @@
 #ifdef HAVE_SYS_IOCTL_H
 # include <sys/ioctl.h>
 #endif
+#include <sys/resource.h>
 #include <sys/sysinfo.h>	/* sysinfo() */
-#include <sys/vfs.h> /* statfs */
+#include <sys/vfs.h>		/* statfs */
 #include <linux/magic.h>
 #ifdef _LIBITE_LITE
 # include <libite/lite.h>
@@ -106,6 +107,34 @@ static char *signames[] = {
 	"IO",
 	"PWR",
 	"SYS",
+};
+
+struct rlimit_name {
+	char *name;
+	int val;
+};
+
+static const struct rlimit_name rlimit_names[] = {
+	{ "as",         RLIMIT_AS         },
+	{ "core",       RLIMIT_CORE       },
+	{ "cpu",        RLIMIT_CPU        },
+	{ "data",       RLIMIT_DATA       },
+	{ "fsize",      RLIMIT_FSIZE      },
+	{ "locks",      RLIMIT_LOCKS      },
+	{ "memlock",    RLIMIT_MEMLOCK    },
+	{ "msgqueue",   RLIMIT_MSGQUEUE   },
+	{ "nice",       RLIMIT_NICE       },
+	{ "nofile",     RLIMIT_NOFILE     },
+	{ "nproc",      RLIMIT_NPROC      },
+	{ "rss",        RLIMIT_RSS        },
+	{ "rtprio",     RLIMIT_RTPRIO     },
+#ifdef RLIMIT_RTTIME
+	{ "rttime",     RLIMIT_RTTIME     },
+#endif
+	{ "sigpending", RLIMIT_SIGPENDING },
+	{ "stack",      RLIMIT_STACK      },
+
+	{ NULL, 0 }
 };
 
 /* https://freedesktop.org/software/systemd/man/systemd.exec.html#id-1.20.8 */
@@ -483,6 +512,50 @@ char *code2str(int code)
 	return exitcodes[code];
 }
 
+int str2rlim(char *str)
+{
+	const struct rlimit_name *rn;
+
+	for (rn = rlimit_names; rn->name; rn++) {
+		if (!strcmp(str, rn->name))
+			return rn->val;
+	}
+
+	return -1;
+}
+
+char *rlim2str(int rlim)
+{
+	const struct rlimit_name *rn;
+
+	for (rn = rlimit_names; rn->name; rn++) {
+		if (rn->val == rlim)
+			return rn->name;
+	}
+
+	return "unknown";
+}
+
+char *lim2str(struct rlimit *rlim)
+{
+	char tmp[25];
+	static char buf[42];
+
+	buf[0] = 0;
+	if (RLIM_INFINITY == rlim->rlim_cur)
+		snprintf(tmp, sizeof(tmp), "unlimited, ");
+	else
+		snprintf(tmp, sizeof(tmp), "%llu, ", (unsigned long long)rlim->rlim_cur);
+	strlcat(buf, tmp, sizeof(buf));
+
+	if (RLIM_INFINITY == rlim->rlim_max)
+		snprintf(tmp, sizeof(tmp), "unlimited, ");
+	else
+		snprintf(tmp, sizeof(tmp), "%llu, ", (unsigned long long)rlim->rlim_max);
+	strlcat(buf, tmp, sizeof(buf));
+
+	return buf;
+}
 
 void do_sleep(unsigned int sec)
 {

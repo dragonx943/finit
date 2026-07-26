@@ -31,6 +31,7 @@
 #include <poll.h>
 #include <stdio.h>
 #include <sys/reboot.h>
+#include <sys/resource.h>
 #include <termios.h>
 #endif
 
@@ -55,6 +56,7 @@ extern char *prognm;
 # include <lite/conio.h>
 # include <lite/lite.h>
 #endif
+
 #include "log.h"
 
 char *progname     (char *arg0);
@@ -80,6 +82,10 @@ int   strtobytes   (char *arg);
 char *sig2str      (int sig);
 int   str2sig      (char *sig);
 char *code2str     (int code);
+
+int   str2rlim     (char *str);
+char *rlim2str     (int rlim);
+char *lim2str      (struct rlimit *rlim);
 
 void  do_sleep     (unsigned int sec);
 void  do_usleep    (unsigned int usec);

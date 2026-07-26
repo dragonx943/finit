@@ -58,15 +58,15 @@
 #include <glob.h>
 
 #include "finit.h"
+#include "cond.h"
 #include "conf.h"
+#include "devmon.h"
 #include "iwatch.h"
 #include "legacy.h"
 #include "private.h"
 #include "service.h"
 #include "helpers.h"
 #include "util.h"
-
-#define BOOTSTRAP (runlevel == INIT_LEVEL)
 
 int   runlevel  = INIT_LEVEL;	/* Bootstrap 'S' */
 int   cfglevel  = RUNLEVEL;	/* Fallback if no configured runlevel */
@@ -104,13 +104,18 @@ struct conf_change {
 	char *name;
 };
 
+struct env_entry {
+	TAILQ_ENTRY(env_entry) link;
+	char *name;
+};
+
+static char cfg_errmsg[256];
 static struct iwatch iw_conf;
 static int iwatch_fd;
 static uev_t etcw;
 
+static TAILQ_HEAD(, env_entry) env_list = TAILQ_HEAD_INITIALIZER(env_list);
 static TAILQ_HEAD(, conf_change) conf_change_list = TAILQ_HEAD_INITIALIZER(conf_change_list);
-
-static void drop_changes(void);
 
 /*
  * libconfuse schema -- the new block format
@@ -288,14 +293,650 @@ static cfg_opt_t conf_opts[] = {
 	CFG_END()
 };
 
+static void drop_changes(void);
+
+
+static int validate_arg(const char *arg, const char *opt)
+{
+	if (!arg) {
+		errx(1, "option %s missing argument, skipping.", opt);
+		return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * finit.cond   = foo          (=> <boot/foo>)
+ * finit.config = /path/to/etc/alt-finit.conf
+ * finit.debug  = [on,off]
+ * finit.fstab  = /path/to/etc/fstab.aternative
+ * finit.status = [on,off]     (compat finit.show_status)
+ * finit.status_style = [old,classic,modern]
+ */
+static void parse_finit_opts(char *opt)
+{
+	char *arg;
+
+	arg = strchr(opt, '=');
+	if (arg)
+		*arg++ = 0;
+
+	if (string_compare(opt, "cond")) {
+		if (validate_arg(arg, "finit.cond"))
+			return;
+		cond_boot_parse(arg);
+		return;
+	}
+
+	if (string_compare(opt, "config")) {
+		if (validate_arg(arg, "finit.config"))
+			return;
+		if (finit_conf)
+			free(finit_conf);
+		finit_conf = strdup(arg);
+		return;
+	}
+
+	if (string_compare(opt, "debug")) {
+		debug = istrue(arg, 1);
+		return;
+	}
+
+	if (string_compare(opt, "fstab")) {
+		if (validate_arg(arg, "finit.fstab"))
+			return;
+		if (fstab)
+			free(fstab);
+		fstab = strdup(arg);
+		return;
+	}
+
+	if (string_compare(opt, "status_style")) {
+		if (validate_arg(arg, "finit.status_style"))
+			return;
+
+		if (string_compare(arg, "old") || string_compare(arg, "classic"))
+			show_progress(PROGRESS_CLASSIC);
+		else
+			show_progress(PROGRESS_MODERN);
+		return;
+	}
+
+	if (string_compare(opt, "status") || string_compare(opt, "show_status")) {
+		show_progress(istrue(arg, 1) ? PROGRESS_DEFAULT : PROGRESS_SILENT);
+		return;
+	}
+}
+
+static void parse_fsck_opts(char *opt)
+{
+	char *arg;
+
+	arg = strchr(opt, '=');
+	if (arg)
+		*arg++ = 0;
+
+	if (string_compare(opt, "mode")) {
+		if (validate_arg(arg, "fsck.mode"))
+			return;
+
+		if (!strcmp(arg, "skip"))
+			fsck_mode = NULL;
+		if (!strcmp(arg, "auto"))
+			fsck_mode = "";
+		if (!strcmp(arg, "force"))
+			fsck_mode = "-f";
+
+		return;
+	}
+
+	if (string_compare(opt, "repair")) {
+		if (validate_arg(arg, "fsck.repair"))
+			return;
+
+		if (!strcmp(arg, "no"))
+			fsck_repair = "-n";
+		if (!strcmp(arg, "preen"))
+			fsck_repair = "-p";
+		if (!strcmp(arg, "yes"))
+			fsck_repair = "-y";
+
+		return;
+	}
+}
+
+/*
+ * When runlevel (single integer) is given on the command line,
+ * it overrides the runlevel in finit.conf and the built-in
+ * default (from configure).  It do however have to pass the
+ * same sanity checks.
+ */
+static int parse_runlevel(char *arg)
+{
+	const char *err = NULL;
+	char *ptr = arg;
+	long long num;
+
+	/* Sanity check the token is just digit(s) */
+	while (*ptr) {
+		if (!isdigit(*ptr++))
+			return 0;
+	}
+
+	num = strtonum(arg, 1, 9, &err);
+	if (err || num == 6) {
+		dbg("Not a valid runlevel (%s), valid levels are [1-9], excluding 6, skipping.", arg);
+		return 0;
+	}
+
+	return (int)num;
+}
+
+static void parse_arg(char *arg)
+{
+	if (!strncmp(arg, "finit.", 6)) {
+		parse_finit_opts(&arg[6]);
+		return;
+	}
+
+	if (!strncmp(arg, "fsck.", 5)) {
+		parse_fsck_opts(&arg[5]);
+		return;
+	}
+
+#ifdef RESCUE_MODE
+	if (string_compare(arg, "rescue") || string_compare(arg, "recover")) {
+		rescue = 1;
+		return;
+	}
+#endif
+
+	if (string_compare(arg, "single") || string_compare(arg, "S")) {
+		single = 1;
+		return;
+	}
+
+	/* Put any new command line options before this line. */
+
+	cmdlevel = parse_runlevel(arg);
+}
+
+#ifdef KERNEL_CMDLINE
+/*
+ * Parse /proc/cmdline to find args for init.  Don't use this!
+ *
+ * Instead, rely on the kernel to give Finit its arguments as
+ * regular argc + argv[].  Only use this if the system you run
+ * on has a broken initramfs system that cannot forward args
+ * to Finit properly.
+ */
+static void parse_kernel_cmdline(void)
+{
+	char line[LINE_SIZE], *cmdline, *tok;
+	FILE *fp;
+
+	fp = fopen("/proc/cmdline", "r");
+	if (!fp)
+		return;
+
+	if (!fgets(line, sizeof(line), fp)) {
+		fclose(fp);
+		return;
+	}
+
+	cmdline = chomp(line);
+	dbg("%s", cmdline);
+
+	while ((tok = strtok(cmdline, " \t"))) {
+		cmdline = NULL;
+		parse_arg(tok);
+	}
+	fclose(fp);
+}
+#else
+#define parse_kernel_cmdline()
+#endif
+
+static void parse_kernel_loglevel(void)
+{
+	char line[LINE_SIZE], *ptr;
+	FILE *fp;
+	int val;
+
+	fp = fopen("/proc/sys/kernel/printk", "r");
+	if (!fp)
+		return;
+
+	if (!fgets(line, sizeof(line), fp)) {
+		fclose(fp);
+		return;
+	}
+	fclose(fp);
+
+	ptr = chomp(line);
+	dbg("%s", ptr);
+	val = atoi(ptr);
+	if (val >= 7)
+		kerndebug = 1;
+}
+
+/*
+ * Kernel gives us all non-kernel options on our cmdline
+ */
+void conf_parse_cmdline(int argc, char *argv[])
+{
+	const char *ptr;
+
+	/* Set up defaults */
+	if ((ptr = FINIT_FSTAB))
+		fstab = strdup(ptr);
+	finit_conf = strdup(FINIT_CONF);
+	finit_rcsd = strdup(FINIT_RCSD);
+
+	for (int i = 1; i < argc; i++)
+		parse_arg(argv[i]);
+
+	parse_kernel_cmdline();
+	parse_kernel_loglevel();
+}
+
+/*
+ * Sourced mainly by initctl and other Finit helper tools
+ */
+void conf_saverc(void)
+{
+	FILE *fp;
+
+	mkpath(_PATH_VARRUN "finit", 0755);
+	fp = fopen(_PATH_VARRUN "finit/.initrc", "w");
+	if (!fp) {
+		err(1, "failed creating .finitrc");
+		return;
+	}
+
+	fprintf(fp, "FINIT_CONF=%s\n", finit_conf);
+	fprintf(fp, "FINIT_RCSD=%s\n", finit_rcsd);
+	fprintf(fp, "FINIT_CGPATH=%s\n", FINIT_CGPATH);
+	fprintf(fp, "INIT_SOCKET=%s\n", INIT_SOCKET);
+	fprintf(fp, "INIT_MAGIC=0x%08x\n", INIT_MAGIC);
+
+	fclose(fp);
+}
+
+/*
+ * Called at bootstrap to log execution order (for debug)
+ */
+void conf_save_exec_order(svc_t *svc, char *cmdline, int result)
+{
+	const char *fn = _PATH_VARRUN "finit/exec.order";
+	const char *ststr = !result ? "[ OK ]" : "[FAIL]";
+	static char *prepared = NULL;
+	int first = !fexist(fn);
+	FILE *fp;
+
+	fp = fopen(fn, "a+");
+	if (!fp) {
+		err(1, "failed writing to %s", fn);
+		return;
+	}
+
+	if (first) {
+		fprintf(fp, "# Execution order of run/task/services at bootstrap\n");
+		fprintf(fp, "# ST    TYPE     COMMAND LINE (DESC)\n");
+	}
+
+	if (result == -1) {
+		int len;
+
+		len = snprintf(NULL, 0, "        %-7s  %-64s (%s)", svc_typestr(svc), cmdline, svc->desc);
+		if (len > 0) {
+			if (prepared)
+				free(prepared);
+			prepared = malloc(++len);
+			if (!prepared)
+				goto done;
+			snprintf(prepared, len, "        %-7s  %-64s (%s)", svc_typestr(svc), cmdline, svc->desc);
+		}
+	} else {
+		if (prepared) {
+			memcpy(prepared, ststr, strlen(ststr));
+			fprintf(fp, "%s\n", prepared);
+			free(prepared);
+			prepared = NULL;
+		} else {
+			fprintf(fp, "%s  %-7s  %-64s (%s)\n", ststr, svc_typestr(svc), cmdline, svc->desc);
+		}
+	}
+done:
+	fclose(fp);
+}
+
+/*
+ * Called by plugins and similar that dynamically generate system services
+ */
+void conf_save_service(int type, char *cfg, char *file)
+{
+	char fn[256];
+	svc_t foo;
+	FILE *fp;
+
+	mkpath(FINIT_RUNPATH_, 0755);
+	snprintf(fn, sizeof(fn), "%s/%s", FINIT_RUNPATH_, file);
+	if (fexist(fn))
+		warnx("File %s already exists, overwriting.", fn);
+	fp = fopen(fn, "w");
+	if (!fp) {
+		err(1, "Failed creating %s", fn);
+		return;
+	}
+
+	foo.type = type;
+	fprintf(fp, "# Generated by finit:%s()\n", __func__);
+	fprintf(fp, "%s %s\n", svc_typestr(&foo), cfg);
+	fclose(fp);
+}
+
+/*
+ * Clear all environment variables read in parse_env(), they may be
+ * removed now so let the next call to parse_env() restore them.
+ */
+void conf_reset_env(void)
+{
+	struct env_entry *node, *tmp;
+
+	TAILQ_FOREACH_SAFE(node, &env_list, link, tmp) {
+		TAILQ_REMOVE(&env_list, node, link);
+		if (node->name) {
+			unsetenv(node->name);
+			free(node->name);
+		}
+		free(node);
+	}
+
+	if (!getenv("PATH"))
+		setenv("PATH", _PATH_STDPATH, 1);
+	if (!getenv("SHELL"))
+		setenv("SHELL", _PATH_BSHELL, 1);
+	setenv("LOGNAME", "root", 1);
+	setenv("USER", "root", 1);
+}
+
+/*
+ * Sets, and makes a note of, all KEY=VALUE lines in a given .conf line
+ * from finit.conf, or other .conf file.  Note, PATH is always reset in
+ * the conf_reset_env() function.
+ */
+void conf_set_env(char *line)
+{
+	struct env_entry *node;
+	char *key, *val;
+
+	key = conf_parse_env(line, &val);
+	if (!key)
+		return;
+
+	dbg("Global env '%s'='%s'", key, val);
+	setenv(key, val, 1);
+
+	node = malloc(sizeof(*node));
+	if (!node) {
+	nomem:
+		err(1, "Out of memory cannot track env vars");
+		return;
+	}
+
+	node->name = strdup(key);
+	if (!node->name) {
+		free(node);
+		goto nomem;
+	}
+
+	TAILQ_INSERT_HEAD(&env_list, node, link);
+}
+
+/**
+ * conf_parse_env - Parse a key=value line
+ * @line: Line buffer without newline
+ * @value:  Whitespace trimmed value
+ *
+ * Used by service.c:source_env() and 
+ *
+ * Returns:
+ * %NULL on error, otherwise a whitespace trimmed key.
+ */
+char *conf_parse_env(char *line, char **value)
+{
+	char *key, *val, *end;
+
+	/* skip any leading whitespace */
+	key = line;
+	while (isspace(*key))
+		key++;
+
+	/* find end of line */
+	end = key;
+	while (*end)
+		end++;
+
+	/* strip trailing whitespace */
+	if (end > key) {
+		end--;
+		while (isspace(*end))
+			*end-- = 0;
+	}
+
+	val = strchr(key, '=');
+	if (!val)
+		return NULL;
+	*val++ = 0;
+
+	/* strip leading whitespace from value */
+	while (isspace(*val))
+		val++;
+
+	/* unquote value, if quoted */
+	unquote(&val, end);
+	*value = val;
+
+	/* find end of key */
+	end = key;
+	while (*end)
+		end++;
+
+	/* strip trailing whitespace */
+	if (end > key) {
+		end--;
+		while (isspace(*end))
+			*end-- = 0;
+	}
+
+	/* strip any leading 'set ' */
+	end = key;
+	if (!strncmp(key, "set", 3))
+		end += 3;
+
+	/* check key, no spaces allowed */
+	while (*end && isspace(*end))
+		end++;
+	key = end;
+	while (*end && !isspace(*end))
+		end++;
+	if (*end != 0) {
+		warnx("'%s=%s': not a valid identifier", key, val);
+		return NULL;	/* invalid key */
+	}
+
+	return key;
+}
+
+/* First form: `rlimit <hard|soft> RESOURCE LIMIT` */
+void conf_parse_rlimit(char *line, struct rlimit arr[])
+{
+	char *level, *limit, *val;
+	int resource = -1;
+	rlim_t cfg;
+
+	level = strtok(line, " \t");
+	if (!level)
+		goto error;
+
+	limit = strtok(NULL, " \t");
+	if (!limit)
+		goto error;
+
+	val = strtok(NULL, " \t");
+	if (!val) {
+		/* Second form: `rlimit RESOURCE LIMIT` */
+		val   = limit;
+		limit = level;
+		level = "both";
+	}
+
+	resource = str2rlim(limit);
+	if (resource < 0 || resource > RLIMIT_NLIMITS)
+		goto error;
+
+	/* Official keyword from v3.1 is `unlimited`, from prlimit(1) */
+	if (!strcmp(val, "unlimited") || !strcmp(val, "infinity")) {
+		cfg = RLIM_INFINITY;
+	} else {
+		const char *err = NULL;
+
+		cfg = strtonum(val, 0, (long long)2 << 31, &err);
+		if (err) {
+			logit(LOG_WARNING, "rlimit: invalid %s value: %s",
+			      rlim2str(resource), val);
+			return;
+		}
+	}
+
+	if (!strcmp(level, "soft"))
+		arr[resource].rlim_cur = cfg;
+	else if (!strcmp(level, "hard"))
+		arr[resource].rlim_max = cfg;
+	else if (!strcmp(level, "both"))
+		arr[resource].rlim_max = arr[resource].rlim_cur = cfg;
+	else
+		goto error;
+
+	return;
+error:
+	logit(LOG_WARNING, "rlimit: parse error");
+}
+
+/* Convert optional "[!123456789S]" string into a bitmask */
+int conf_parse_runlevels(const char *runlevels)
+{
+	int i, not = 0, bitmask = 0;
+
+	if (!runlevels)
+		runlevels = "[234]";
+	i = 1;
+	while (i) {
+		int level;
+		char lvl = runlevels[i++];
+
+		if (']' == lvl || 0 == lvl)
+			break;
+		if ('!' == lvl) {
+			not = 1;
+			bitmask = 0x7FE;
+			continue;
+		}
+
+		if ('s' == lvl || 'S' == lvl)
+			level = INIT_LEVEL;
+		else
+			level = lvl - '0';
+
+		if (level > INIT_LEVEL || level < 0)
+			continue;
+
+		if (not)
+			CLRBIT(bitmask, level);
+		else
+			SETBIT(bitmask, level);
+	}
+
+	return bitmask;
+}
+
+void conf_parse_cond(svc_t *svc, char *cond)
+{
+	size_t i = 0;
+	char *ptr;
+	char *c;
+
+	if (!svc) {
+		errx(1, "Invalid service pointer");
+		return;
+	}
+
+	/* By default we assume UNIX daemons support SIGHUP */
+	if (svc_is_daemon(svc))
+		svc->sighup = 1;
+
+	if (!cond) {
+		memset(svc->cond, 0, sizeof(svc->cond));
+		return;
+	}
+
+	/*
+	 * First character must be '!' if:
+	 *   - service:  SIGHUP is not supported
+	 *   - run/task: Do not block bootstrap
+	 */
+	ptr = cond;
+	if (ptr[i] == '!') {
+		ptr++;
+
+		if (svc_is_runtask(svc)) {
+			/* see service_runtask_clean() */
+			svc->sighup = 1;
+			svc->once = 1;
+		} else {
+			svc->sighup = 0;
+		}
+	}
+
+	while (ptr[i] != '>' && ptr[i] != 0)
+		i++;
+	ptr[i] = 0;
+
+	if (i >= sizeof(svc->cond)) {
+		logit(LOG_WARNING, "%s: too long list of conditions: %s", svc_ident(svc, NULL, 0), ptr);
+		return;
+	}
+
+	/*
+	 * The '~' prefix means a reload of the upstream service is
+	 * propagated to this service -- it will be reloaded (SIGHUP)
+	 * or restarted (noreload), not just paused and resumed.
+	 * Syntax: <!~pid/foo,~pid/bar> or <~pid/foo>
+	 *
+	 * Strip '~' from each condition and set the service-level
+	 * flag.  This allows '~' on any condition in the list.
+	 */
+	svc->cond[0] = 0;
+	for (i = 0, c = strtok(ptr, ","); c; c = strtok(NULL, ","), i++) {
+		if (c[0] == '~') {
+			c++;
+			svc->flux_reload = 1;
+		}
+		devmon_add_cond(c);
+		if (i)
+			strlcat(svc->cond, ",", sizeof(svc->cond));
+		strlcat(svc->cond, c, sizeof(svc->cond));
+	}
+}
+
 /*
  * Try-parse error capture.  Diagnostics are buffered, not printed:
  * on fallback to the legacy parser they are only debug logged.  The
  * last message wins -- the parser stops at the first fatal error, so
  * the last callback before failure is the fatal one.
  */
-static char cfg_errmsg[256];
-
 static void cfg_error_cb(cfg_t *cfg, const char *fmt, va_list ap)
 {
 	char msg[128];
@@ -669,7 +1310,7 @@ static void env_translate(cfg_t *cfg, const char *section)
 
 		snprintf(buf, sizeof(buf), "%s=%s", opt->name,
 			 cfg_opt_getnstr(opt, 0));
-		legacy_parse_env(buf);
+		conf_set_env(buf);
 	}
 }
 
@@ -780,9 +1421,11 @@ static void conf_parse_statics(cfg_t *cfg)
 	if (cfg_size(cfg, "service-interval")) {
 		long val = cfg_getint(cfg, "service-interval");
 
+		/* 0 min to 1 day, should check at least daily */
 		if (val >= 0 && val <= 1440) {
 			int disabled = !service_interval;
 
+			/* milliseconds for libuEv timer */
 			service_interval = (int)val * 1000;
 			if (disabled)
 				service_init(NULL);
@@ -913,7 +1556,9 @@ static int is_new_format(char *file)
 }
 
 /*
- * Parse one Finit .conf file, in either format, see top of file.
+ * Parse one Finit .conf file, in either format.  The legacy .conf
+ * include directive routes back through this so included files are
+ * format-detected too.
  */
 int conf_parse_file(char *file, int is_rcsd)
 {
