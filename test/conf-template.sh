@@ -25,7 +25,7 @@ test_teardown()
 say 'Install a block-format template'
 run "echo 'service serv:%i {'                          >  $FINIT_RCSD/available/serv@.conf"
 run "echo '    description = \"Template for %i\"'      >> $FINIT_RCSD/available/serv@.conf"
-run "echo '    pid         = \"/run/serv-%i.pid\"'     >> $FINIT_RCSD/available/serv@.conf"
+run "echo '    pidfile     = \"/run/serv-%i.pid\"'     >> $FINIT_RCSD/available/serv@.conf"
 run "echo '    command     = \"serv -n -p -P /run/serv-%i.pid\"' >> $FINIT_RCSD/available/serv@.conf"
 run "echo '}'                                          >> $FINIT_RCSD/available/serv@.conf"
 

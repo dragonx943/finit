@@ -193,6 +193,19 @@ static cfg_opt_t env_opts[] = {
 	CFG_END()
 };
 
+/*
+ * log { file = "/var/log/foo" ... } -- where a service's output goes.
+ * /dev/null and /dev/console are spelled as paths, so there is one way
+ * to say it.  An empty block means syslog with defaults; `log` cannot
+ * also be a scalar, libconfuse rejects a name declared as both.
+ */
+static cfg_opt_t svclog_opts[] = {
+	CFG_STR("file",     NULL, CFGF_NODEFAULT),
+	CFG_STR("priority", NULL, CFGF_NODEFAULT),
+	CFG_STR("identity", NULL, CFGF_NODEFAULT),
+	CFG_END()
+};
+
 /* log { size = 200k  count = 5 } -- Finit's own log rotation */
 static cfg_opt_t log_opts[] = {
 	CFG_STR("size",  NULL, CFGF_NODEFAULT),
@@ -200,43 +213,59 @@ static cfg_opt_t log_opts[] = {
 	CFG_END()
 };
 
+/* a lifecycle script and the bound on how long it may run */
+#define EXEC_OPTS(nm)					\
+	CFG_STR(nm,            NULL, CFGF_NODEFAULT),	\
+	CFG_INT(nm "-timeout", 0,    CFGF_NODEFAULT)
+
 /* service NAME[:ID] { ... }, shared with task/run/sysv */
 static cfg_opt_t svc_opts[] = {
 	CFG_STR     ("description",  NULL, CFGF_NODEFAULT),
 	CFG_STR     ("desc",         NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_STR     ("command",      NULL, CFGF_NODEFAULT),
-	CFG_STR     ("exec",         NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_STR     ("runlevel",     NULL, CFGF_NODEFAULT),
-	CFG_STR_LIST("condition",    NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("conditions",   NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("cond",         NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_STR     ("user",         NULL, CFGF_NODEFAULT),
-	CFG_STR_LIST("group",        NULL, CFGF_NODEFAULT),
-	CFG_STR     ("environment",  NULL, CFGF_NODEFAULT),
+	CFG_STR     ("group",        NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("extra-groups", NULL, CFGF_NODEFAULT),
+	CFG_STR     ("envfile",      NULL, CFGF_NODEFAULT),
 	CFG_STR     ("env",          NULL, CFGF_NODEFAULT),	/* alias */
-	CFG_STR     ("pid",          NULL, CFGF_NODEFAULT),
-	CFG_STR     ("log",          NULL, CFGF_NODEFAULT),
+	CFG_STR     ("pidfile",      NULL, CFGF_NODEFAULT),
+	CFG_BOOL    ("pidfile-create", cfg_false, CFGF_NODEFAULT),
 	CFG_STR     ("notify",       NULL, CFGF_NODEFAULT),
 	CFG_STR     ("type",         NULL, CFGF_NODEFAULT),
 	CFG_BOOL    ("manual",       cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("remain",       cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("respawn",      cfg_false, CFGF_NODEFAULT),
-	CFG_BOOL    ("nowarn",       cfg_false, CFGF_NODEFAULT),
 	CFG_STR     ("restart",      NULL, CFGF_NODEFAULT),
-	CFG_INT     ("restart_sec",  0,    CFGF_NODEFAULT),
+	CFG_INT     ("restart-max",  0,    CFGF_NODEFAULT),
+	CFG_INT     ("restart-sec",  0,    CFGF_NODEFAULT),
 	CFG_STR     ("oncrash",      NULL, CFGF_NODEFAULT),
-	CFG_STR     ("halt",         NULL, CFGF_NODEFAULT),
-	CFG_INT     ("kill",         0,    CFGF_NODEFAULT),
-	CFG_STR     ("pre",          NULL, CFGF_NODEFAULT),
-	CFG_STR     ("post",         NULL, CFGF_NODEFAULT),
-	CFG_STR     ("ready",        NULL, CFGF_NODEFAULT),
-	CFG_STR     ("cleanup",      NULL, CFGF_NODEFAULT),
-	CFG_STR     ("reload",       NULL, CFGF_NODEFAULT),
-	CFG_STR     ("stop",         NULL, CFGF_NODEFAULT),
+	CFG_STR     ("stop-signal",  NULL, CFGF_NODEFAULT),
+	CFG_STR     ("halt",         NULL, CFGF_NODEFAULT),	/* alias */
+	CFG_INT     ("stop-timeout", 0,    CFGF_NODEFAULT),
+	CFG_INT     ("kill",         0,    CFGF_NODEFAULT),	/* alias */
+
+	/* lifecycle scripts, each with its own bound */
+	EXEC_OPTS("exec-start-pre"),
+	EXEC_OPTS("exec-start-ready"),
+	EXEC_OPTS("exec-stop"),
+	EXEC_OPTS("exec-stop-post"),
+	EXEC_OPTS("exec-reload"),
+	EXEC_OPTS("exec-cleanup"),
+
 	CFG_STR_LIST("capabilities", NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("caps",         NULL, CFGF_NODEFAULT),	/* alias */
-	CFG_STR_LIST("conflict",     NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("conflicts",    NULL, CFGF_NODEFAULT),
 	CFG_STR     ("if",           NULL, CFGF_NODEFAULT),
 	CFG_STR     ("tty",          NULL, CFGF_NODEFAULT),
+	/*
+	 * MULTI is not about repetition here, it is the only way to tell
+	 * `log {}` from no log at all: libconfuse instantiates every
+	 * non-MULTI section, so cfg_size() would always answer 1.
+	 */
+	CFG_SEC     ("log",          svclog_opts, CFGF_MULTI),
 	CFG_SEC     ("cgroup",       cgroup_opts, CFGF_MULTI | CFGF_TITLE | CFGF_KEYSTRVAL),
 	CFG_SEC     ("rlimit",       rlimit_opts, CFGF_NONE),
 	CFG_END()
@@ -245,7 +274,7 @@ static cfg_opt_t svc_opts[] = {
 /* tty NAME { ... } -- all three legacy variants */
 static cfg_opt_t tty_opts[] = {
 	CFG_STR     ("runlevel",  NULL, CFGF_NODEFAULT),
-	CFG_STR_LIST("condition", NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("conditions", NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("cond",      NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_STR     ("device",    NULL, CFGF_NODEFAULT),
 	CFG_INT     ("baud",      0,    CFGF_NODEFAULT),
@@ -254,7 +283,6 @@ static cfg_opt_t tty_opts[] = {
 	CFG_BOOL    ("nowait",    cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("nologin",   cfg_false, CFGF_NODEFAULT),
 	CFG_STR     ("command",   NULL, CFGF_NODEFAULT),
-	CFG_STR     ("exec",      NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_BOOL    ("notty",     cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("rescue",    cfg_false, CFGF_NODEFAULT),
 	CFG_END()
@@ -275,8 +303,8 @@ static cfg_opt_t conf_opts[] = {
 	/* static/bootstrap directives */
 	CFG_INT     ("runlevel",         0,    CFGF_NODEFAULT),
 	CFG_STR     ("hostname",         NULL, CFGF_NODEFAULT),
-	CFG_STR     ("host",             NULL, CFGF_NODEFAULT),	/* alias */
-	CFG_STR_LIST("module",           NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("modules",          NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("mod",              NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_STR_LIST("mknod",            NULL, CFGF_NODEFAULT),
 	CFG_STR     ("network",          NULL, CFGF_NODEFAULT),
 	CFG_STR     ("rcsd",             NULL, CFGF_NODEFAULT),
@@ -960,13 +988,31 @@ static void cfg_error_quiet(cfg_t *cfg, const char *fmt, va_list ap)
 /*
  * Alias helpers: canonical key wins, alias accepted.
  */
-static const char *sec_getstr(cfg_t *sec, const char *key, const char *alias)
+/* which of KEY or ALIAS the user actually set, canonical wins */
+static const char *sec_key(cfg_t *sec, const char *key, const char *alias)
 {
 	if (cfg_size(sec, key))
-		return cfg_getstr(sec, key);
+		return key;
 	if (alias && cfg_size(sec, alias))
-		return cfg_getstr(sec, alias);
+		return alias;
 	return NULL;
+}
+
+static const char *sec_getstr(cfg_t *sec, const char *key, const char *alias)
+{
+	key = sec_key(sec, key, alias);
+
+	return key ? cfg_getstr(sec, key) : NULL;
+}
+
+static int sec_getint(cfg_t *sec, const char *key, const char *alias, long *val)
+{
+	key = sec_key(sec, key, alias);
+	if (!key)
+		return 0;
+	*val = cfg_getint(sec, key);
+
+	return 1;
 }
 
 static char *sec_getlist(cfg_t *sec, const char *key, const char *alias, char *buf, size_t len)
@@ -1083,6 +1129,73 @@ static void rlimit_translate(cfg_t *sec, struct rlimit arr[])
 }
 
 /*
+ * exec-NAME [+ exec-NAME-timeout] -> legacy "tok:[SEC,]script"
+ */
+static void addscript(char *line, size_t len, cfg_t *sec, const char *key,
+		      const char *tok)
+{
+	char tmo[64];
+	const char *str;
+	char buf[512];
+
+	str = sec_getstr(sec, key, NULL);
+	if (!str)
+		return;
+
+	snprintf(tmo, sizeof(tmo), "%s-timeout", key);
+	if (cfg_size(sec, tmo))
+		snprintf(buf, sizeof(buf), "%ld,%s", cfg_getint(sec, tmo), str);
+	else
+		strlcpy(buf, str, sizeof(buf));
+
+	addopt(line, len, tok, buf);
+}
+
+/*
+ * log { file = "..." priority = "..." identity = "..." } -> legacy
+ * "log" or "log:file,prio:P,tag:I".  An empty block is syslog with
+ * defaults; /dev/null and /dev/console arrive here as a file.
+ */
+static void addlog(char *line, size_t len, cfg_t *sec, char *file)
+{
+	unsigned int num = cfg_size(sec, "log");
+	char buf[512] = "";
+	const char *str;
+	cfg_t *log;
+
+	if (!num)
+		return;
+
+	log = cfg_getnsec(sec, "log", num - 1);
+	if (!log)
+		return;
+
+	if (num > 1)
+		logit(LOG_WARNING, "%s: %s declares %u log blocks, using the last",
+		      file, cfg_title(sec), num);
+
+	if ((str = sec_getstr(log, "file", NULL)))
+		strlcpy(buf, str, sizeof(buf));
+	if ((str = sec_getstr(log, "priority", NULL))) {
+		if (buf[0])
+			strlcat(buf, ",", sizeof(buf));
+		strlcat(buf, "prio:", sizeof(buf));
+		strlcat(buf, str, sizeof(buf));
+	}
+	if ((str = sec_getstr(log, "identity", NULL))) {
+		if (buf[0])
+			strlcat(buf, ",", sizeof(buf));
+		strlcat(buf, "tag:", sizeof(buf));
+		strlcat(buf, str, sizeof(buf));
+	}
+
+	if (buf[0])
+		addopt(line, len, "log:", buf);
+	else
+		addtok(line, len, "log");
+}
+
+/*
  * Translate service/task/run/sysv section to the canonical legacy
  * one-liner and register through the same path as legacy files.
  */
@@ -1090,23 +1203,30 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 {
 	struct rlimit local_rlimit[RLIMIT_NLIMITS];
 	char line[LINE_SIZE] = "";
-	const char *str, *cmd;
-	unsigned int num;
+	const char *str, *cmd, *grp;
+	unsigned int cnt;
+	int nowarn, own;
+	long num;
 	char buf[512];
 	char nm[80];
 	char *id;
 
-	cmd = sec_getstr(sec, "command", "exec");
+	cmd = sec_getstr(sec, "command", NULL);
 	if (!cmd) {
 		logit(LOG_ERR, "%s: section '%s' missing command, skipping",
 		      file, cfg_title(sec));
 		return;
 	}
 
+	/* a leading - tolerates a missing binary, cf. systemd ExecStart=- */
+	nowarn = cmd[0] == '-';
+	if (nowarn)
+		cmd++;
+
 	if ((str = sec_getstr(sec, "runlevel", NULL)))
 		addtok(line, sizeof(line), "[%s]", str);
 
-	if (sec_getlist(sec, "condition", "cond", buf, sizeof(buf)))
+	if (sec_getlist(sec, "conditions", "cond", buf, sizeof(buf)))
 		addtok(line, sizeof(line), "<%s>", buf);
 
 	/* section title is the identity: NAME[:ID], %i in templates */
@@ -1118,29 +1238,39 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	if (id && *id)
 		addtok(line, sizeof(line), ":%s", id);
 
-	/* @user[:group[,supplementary,...]], first group is primary */
+	/* @user[:group[,extra,...]] */
 	str = sec_getstr(sec, "user", NULL);
-	if (sec_getlist(sec, "group", NULL, buf, sizeof(buf)))
-		addtok(line, sizeof(line), "@%s:%s", str ? str : "root", buf);
+	grp = sec_getstr(sec, "group", NULL);
+	if (sec_getlist(sec, "extra-groups", NULL, buf, sizeof(buf)))
+		addtok(line, sizeof(line), "@%s:%s,%s", str ? str : "root",
+		       grp ? grp : "root", buf);
+	else if (grp)
+		addtok(line, sizeof(line), "@%s:%s", str ? str : "root", grp);
 	else if (str)
 		addtok(line, sizeof(line), "@%s", str);
 
-	if ((str = sec_getstr(sec, "environment", "env")))
+	if ((str = sec_getstr(sec, "envfile", "env")))
 		addopt(line, sizeof(line), "env:", str);
 
-	if ((str = sec_getstr(sec, "log", NULL))) {
-		if (!strcmp(str, "true"))
-			addtok(line, sizeof(line), "log");
-		else if (strcmp(str, "false"))
-			addopt(line, sizeof(line), "log:", str);
-	}
+	addlog(line, sizeof(line), sec, file);
 
-	if ((str = sec_getstr(sec, "pid", NULL))) {
-		if (!strcmp(str, "true"))
-			addtok(line, sizeof(line), "pid");
-		else if (strcmp(str, "false"))
-			addopt(line, sizeof(line), "pid:", str);
-	}
+	/*
+	 * The daemon owns its pidfile unless told otherwise, so the
+	 * legacy ! is the default here and pidfile-create drops it.
+	 */
+	/*
+	 * The daemon owns its pidfile unless told otherwise, so the
+	 * legacy ! is the default here and pidfile-create drops it.  A
+	 * daemon-owned default path needs no token, that is what the
+	 * pidfile plugin discovers on its own.
+	 */
+	str = sec_getstr(sec, "pidfile", NULL);
+	own = sec_getbool(sec, "pidfile-create");
+
+	if (str && strcmp(str, "true") && strcmp(str, "false"))
+		addopt(line, sizeof(line), own ? "pid:" : "pid:!", str);
+	else if (own)
+		addtok(line, sizeof(line), "pid");
 
 	if ((str = sec_getstr(sec, "notify", NULL)))
 		addtok(line, sizeof(line), "notify:%s", str);
@@ -1159,41 +1289,47 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 		addtok(line, sizeof(line), "remain:yes");
 	if (sec_getbool(sec, "respawn"))
 		addtok(line, sizeof(line), "respawn");
-	if (sec_getbool(sec, "nowarn"))
+	if (nowarn)
 		addtok(line, sizeof(line), "nowarn");
-
-	if ((str = sec_getstr(sec, "restart", NULL))) {
-		if (!strcmp(str, "never"))
-			addtok(line, sizeof(line), "norestart");
-		else
-			addtok(line, sizeof(line), "restart:%s", str);
+	/*
+	 * restart is the policy, restart-max the count.  true is the
+	 * default policy and needs no token unless a count came with it.
+	 */
+	str = sec_getstr(sec, "restart", NULL);
+	if (!str)
+		str = "true";
+	if (!strcmp(str, "never") || !strcmp(str, "false"))
+		addtok(line, sizeof(line), "norestart");
+	else if (!strcmp(str, "always"))
+		addtok(line, sizeof(line), "restart:always");
+	else {
+		if (strcmp(str, "true"))
+			logit(LOG_WARNING, "%s: unknown restart '%s', assuming true",
+			      file, str);
+		if (sec_getint(sec, "restart-max", NULL, &num))
+			addtok(line, sizeof(line), "restart:%ld", num);
 	}
-	if (cfg_size(sec, "restart_sec"))
-		addtok(line, sizeof(line), "restart_sec:%ld", cfg_getint(sec, "restart_sec"));
+
+	if (sec_getint(sec, "restart-sec", NULL, &num))
+		addtok(line, sizeof(line), "restart_sec:%ld", num);
 
 	if ((str = sec_getstr(sec, "oncrash", NULL)))
 		addtok(line, sizeof(line), "oncrash:%s", str);
-	if ((str = sec_getstr(sec, "halt", NULL)))
+	if ((str = sec_getstr(sec, "stop-signal", "halt")))
 		addtok(line, sizeof(line), "halt:%s", str);
-	if (cfg_size(sec, "kill"))
-		addtok(line, sizeof(line), "kill:%ld", cfg_getint(sec, "kill"));
+	if (sec_getint(sec, "stop-timeout", "kill", &num))
+		addtok(line, sizeof(line), "kill:%ld", num);
 
-	if ((str = sec_getstr(sec, "pre", NULL)))
-		addopt(line, sizeof(line), "pre:", str);
-	if ((str = sec_getstr(sec, "post", NULL)))
-		addopt(line, sizeof(line), "post:", str);
-	if ((str = sec_getstr(sec, "ready", NULL)))
-		addopt(line, sizeof(line), "ready:", str);
-	if ((str = sec_getstr(sec, "cleanup", NULL)))
-		addopt(line, sizeof(line), "cleanup:", str);
-	if ((str = sec_getstr(sec, "reload", NULL)))
-		addopt(line, sizeof(line), "reload:", str);
-	if ((str = sec_getstr(sec, "stop", NULL)))
-		addopt(line, sizeof(line), "stop:", str);
+	addscript(line, sizeof(line), sec, "exec-start-pre",   "pre:");
+	addscript(line, sizeof(line), sec, "exec-start-ready", "ready:");
+	addscript(line, sizeof(line), sec, "exec-stop",        "stop:");
+	addscript(line, sizeof(line), sec, "exec-stop-post",   "post:");
+	addscript(line, sizeof(line), sec, "exec-reload",      "reload:");
+	addscript(line, sizeof(line), sec, "exec-cleanup",     "cleanup:");
 
 	if (sec_getlist(sec, "capabilities", "caps", buf, sizeof(buf)))
 		addtok(line, sizeof(line), "caps:%s", buf);
-	if (sec_getlist(sec, "conflict", NULL, buf, sizeof(buf)))
+	if (sec_getlist(sec, "conflicts", NULL, buf, sizeof(buf)))
 		addtok(line, sizeof(line), "conflict:%s", buf);
 
 	if ((str = sec_getstr(sec, "if", NULL)))
@@ -1206,13 +1342,13 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	 * service joins exactly one group, so on duplicates the last
 	 * one wins, like a repeated token in a legacy one-liner.
 	 */
-	num = cfg_size(sec, "cgroup");
-	if (num) {
-		cfg_t *cg = cfg_getnsec(sec, "cgroup", num - 1);
+	cnt = cfg_size(sec, "cgroup");
+	if (cnt) {
+		cfg_t *cg = cfg_getnsec(sec, "cgroup", cnt - 1);
 
-		if (num > 1)
+		if (cnt > 1)
 			logit(LOG_WARNING, "%s: %s declares %u cgroup blocks,"
-			      " using '%s'", file, cfg_title(sec), num,
+			      " using '%s'", file, cfg_title(sec), cnt,
 			      cfg_title(cg));
 
 		cgroup_settings(cg, buf, sizeof(buf));
@@ -1252,11 +1388,15 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 	if ((str = sec_getstr(sec, "runlevel", NULL)))
 		addtok(line, sizeof(line), "[%s]", str);
 
-	if (sec_getlist(sec, "condition", "cond", buf, sizeof(buf)))
+	if (sec_getlist(sec, "conditions", "cond", buf, sizeof(buf)))
 		addtok(line, sizeof(line), "<%s>", buf);
 
 	dev = sec_getstr(sec, "device", NULL);
-	cmd = sec_getstr(sec, "command", "exec");
+	cmd = sec_getstr(sec, "command", NULL);
+	if (cmd && cmd[0] == '-') {
+		addtok(line, sizeof(line), "nowarn");
+		cmd++;
+	}
 
 	if (dev) {
 		addtok(line, sizeof(line), "%s", dev);
@@ -1320,11 +1460,11 @@ static void env_translate(cfg_t *cfg, const char *section)
  */
 static void conf_parse_statics(cfg_t *cfg)
 {
+	const char *str, *key;
 	unsigned int i;
-	const char *str;
 
 	if (BOOTSTRAP) {
-		if ((str = sec_getstr(cfg, "hostname", "host"))) {
+		if ((str = sec_getstr(cfg, "hostname", NULL))) {
 			if (hostname)
 				free(hostname);
 			hostname = strdup(str);
@@ -1339,8 +1479,9 @@ static void conf_parse_statics(cfg_t *cfg)
 			run_interactive(cmd, "Creating device node %s", dev);
 		}
 
-		for (i = 0; i < cfg_size(cfg, "module"); i++)
-			kmod_load(cfg_getnstr(cfg, "module", i));
+		key = sec_key(cfg, "modules", "mod");
+		for (i = 0; key && i < cfg_size(cfg, key); i++)
+			kmod_load(cfg_getnstr(cfg, key, i));
 
 		if ((str = sec_getstr(cfg, "network", NULL))) {
 			if (network)

@@ -23,7 +23,7 @@ run envprobe {\n\
 test_teardown()
 {
     say "Running test teardown."
-    run "rm -f $FINIT_CONF /tmp/envprobe-*"
+    run "rm -f $FINIT_CONF /tmp/envprobe-* /tmp/pre /run/blockfmt.pid /run/notmine.pid"
     run "rm -f $FINIT_RCSD/legacy-side.conf"
 }
 
@@ -65,8 +65,8 @@ say "Add new-format service block in $FINIT_CONF"
 run "echo 'service service.sh {'                    >  $FINIT_CONF"
 run "echo '    description = \"Test service\"'     >> $FINIT_CONF"
 run "echo '    runlevel    = \"2345\"'             >> $FINIT_CONF"
-run "echo '    kill        = 20'                   >> $FINIT_CONF"
-run "echo '    log         = true'                 >> $FINIT_CONF"
+run "echo '    stop-timeout = 20'                   >> $FINIT_CONF"
+run "echo '    log { }'                 >> $FINIT_CONF"
 # Exercises the cgroup translation path.  Whether the group is really
 # joined cannot be asserted here, cgroup_avail() is false inside the
 # test namespace, so initctl reports no cgroup at all.
@@ -131,3 +131,54 @@ run "initctl reload"
 
 retry 'assert_num_children 1 service.sh'
 assert_desc "Test service" service.sh
+
+# The renamed and split settings each have translation logic behind
+# them, so exercise the ones with a visible effect.
+# Only the warning differs, service_register() bails before svc_new()
+# either way, so this asserts the stanza is skipped, not that the
+# warning was suppressed.  The emitted one-liner is where nowarn is
+# visible, with finit.debug=on.
+say 'A leading - on command tolerates a missing binary'
+run "echo 'service ghost {'                        >  $FINIT_CONF"
+run "echo '    description = \"Ghost\"'            >> $FINIT_CONF"
+run "echo '    command     = \"-/no/such/binary\"' >> $FINIT_CONF"
+run "echo '}'                                      >> $FINIT_CONF"
+run "initctl reload"
+
+assert_num_services 0 ghost
+
+say 'exec-start-pre runs before the service, pidfile-create makes Finit own the file'
+run "echo 'service service.sh {'                       >  $FINIT_CONF"
+run "echo '    description    = \"Test service\"'      >> $FINIT_CONF"
+run "echo '    conditions     = { \"hook/svc/up\" }'   >> $FINIT_CONF"
+run "echo '    exec-start-pre = \"/bin/pre.sh\"'       >> $FINIT_CONF"
+run "echo '    exec-start-pre-timeout = 5'             >> $FINIT_CONF"
+run "echo '    pidfile        = \"/run/blockfmt.pid\"' >> $FINIT_CONF"
+run "echo '    pidfile-create = true'                  >> $FINIT_CONF"
+run "echo '    restart        = true'                  >> $FINIT_CONF"
+run "echo '    restart-max    = 3'                     >> $FINIT_CONF"
+run "echo '    command        = \"service.sh\"'        >> $FINIT_CONF"
+run "echo '}'                                          >> $FINIT_CONF"
+run "initctl reload"
+
+retry 'assert_num_children 1 service.sh'
+retry 'assert_file_exists /tmp/pre'
+assert_restart_cnt 0 "0/3" service.sh
+
+# service.sh writes /run/service.pid, never /run/blockfmt.pid, so only
+# Finit can have created this one.  assert_is_pidfile cannot tell, it
+# prints the path with any leading ! stripped.
+retry 'assert_file_exists /run/blockfmt.pid'
+
+say 'Without pidfile-create the daemon owns the file, Finit does not make it'
+run "echo 'service service.sh {'                       >  $FINIT_CONF"
+run "echo '    description = \"Test service\"'         >> $FINIT_CONF"
+run "echo '    pidfile     = \"/run/notmine.pid\"'     >> $FINIT_CONF"
+run "echo '    command     = \"service.sh\"'           >> $FINIT_CONF"
+run "echo '}'                                          >> $FINIT_CONF"
+run "rm -f /run/notmine.pid"
+run "initctl reload"
+
+retry 'assert_num_children 1 service.sh'
+assert "daemon-owned pidfile is not created by Finit" \
+       "$(texec ls /run/notmine.pid 2>/dev/null)" = ""
