@@ -33,6 +33,7 @@
 #include <regex.h>
 #include <string.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #ifdef HAVE_TERMIOS_H
 # include <termios.h>
@@ -335,34 +336,109 @@ int mksubsys(const char *dir, mode_t mode, char *user, char *group)
 	return rc;
 }
 
-int fnread(char *buf, size_t len, char *fmt, ...)
+/*
+ * Read an open stream to EOF into a malloc()'ed, NUL terminated buffer.
+ *
+ * st_size is only a hint here, and zero on procfs, so the read loop
+ * runs until EOF rather than trusting it.  Sizing from the already
+ * open fd also leaves no window for the file to change between the
+ * look and the read.
+ */
+static char *slurp(FILE *fp, size_t *lenp)
 {
-	char path[256];
-	va_list ap;
-	FILE *fp;
+	size_t len = 0, size = BUFSIZ;
+	struct stat st;
+	char *buf;
 
-	va_start(ap, fmt);
-	vsnprintf(path, sizeof(path), fmt, ap);
-	va_end(ap);
+	if (!fstat(fileno(fp), &st) && st.st_size > 0 && (size_t)st.st_size > size)
+		size = (size_t)st.st_size;
 
-	if (!buf || !len) {
-		struct stat st;
+	buf = malloc(size + 1);
+	if (!buf)
+		return NULL;
 
-		if (stat(path, &st))
-			return -1;
+	while (1) {
+		char *ptr;
 
-		return (ssize_t)st.st_size;
+		len += fread(&buf[len], 1, size - len, fp);
+		if (len < size)
+			break;		/* EOF, or error caught below */
+
+		ptr = realloc(buf, size * 2 + 1);
+		if (!ptr) {
+			free(buf);
+			return NULL;
+		}
+		buf = ptr;
+		size *= 2;
 	}
 
-	fp = fopen(path, "r");
-	if (!fp)
-		return -1;
+	if (ferror(fp)) {
+		free(buf);
+		return NULL;
+	}
 
-	len = fread(buf, sizeof(char), len - 1, fp);
 	buf[len] = 0;
+	if (lenp)
+		*lenp = len;
+
+	return buf;
+}
+
+/*
+ * Read a whole file into a malloc()'ed, NUL terminated buffer, which
+ * the caller frees.  @lenp, when given, returns the number of bytes
+ * read; the content may itself contain NUL, e.g. /proc/PID/cmdline.
+ */
+char *vfslurp(size_t *lenp, const char *fmt, va_list ap)
+{
+	char *buf;
+	FILE *fp;
+
+	fp = vfopenf("r", fmt, ap);
+	if (!fp)
+		return NULL;
+
+	buf = slurp(fp, lenp);
 	fclose(fp);
 
-	return (int)len;
+	return buf;
+}
+
+char *fslurp(size_t *lenp, const char *fmt, ...)
+{
+	va_list ap;
+	char *buf;
+
+	va_start(ap, fmt);
+	buf = vfslurp(lenp, fmt, ap);
+	va_end(ap);
+
+	return buf;
+}
+
+int fnread(char *buf, size_t len, char *fmt, ...)
+{
+	size_t dlen;
+	va_list ap;
+	char *data;
+
+	va_start(ap, fmt);
+	data = vfslurp(&dlen, fmt, ap);
+	va_end(ap);
+
+	if (!data)
+		return -1;
+
+	if (buf && len) {
+		if (dlen > len - 1)
+			dlen = len - 1;
+		memcpy(buf, data, dlen);
+		buf[dlen] = 0;
+	}
+	free(data);
+
+	return (int)dlen;
 }
 
 int fnwrite(char *value, char *fmt, ...)

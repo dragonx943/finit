@@ -29,6 +29,7 @@
 #include <ctype.h>
 #ifdef HAVE_TERMIOS_H
 #include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <sys/reboot.h>
 #include <sys/resource.h>
@@ -72,6 +73,8 @@ int   getcgroup    (char *buf, size_t len);
 
 int   mksubsys     (const char *dir, mode_t mode, char *user, char *group);
 
+char *fslurp       (size_t *lenp, const char *fmt, ...)    __attribute__ ((format (printf, 2, 3)));
+char *vfslurp      (size_t *lenp, const char *fmt, va_list ap);
 int   fnread       (char *buf, size_t len, char *fmt, ...) __attribute__ ((format (printf, 3, 4)));
 int   fnwrite      (char *value, char *fmt, ...)           __attribute__ ((format (printf, 2, 3)));
 int   fngetint     (char *path, int *val);

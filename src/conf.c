@@ -1660,30 +1660,13 @@ static int is_new_format(char *file, char *buf)
  */
 static char *conf_read_template(char *file, char *name)
 {
-	struct stat st;
-	char *buf = NULL;
-	size_t len;
-	FILE *fp;
+	char *buf;
 
-	fp = fopen(file, "r");
-	if (!fp)
+	buf = fslurp(NULL, "%s", file);
+	if (!buf)
 		return NULL;
 
-	/* fstat() the open fd, no window for the file to change under us */
-	if (fstat(fileno(fp), &st) || st.st_size < 0)
-		goto out;
-
-	buf = malloc((size_t)st.st_size + 1);
-	if (!buf)
-		goto out;
-
-	len = fread(buf, 1, (size_t)st.st_size, fp);
-	buf[len] = 0;
-	buf = conf_instantiate(buf, name);
-out:
-	fclose(fp);
-
-	return buf;
+	return conf_instantiate(buf, name);
 }
 
 /*
