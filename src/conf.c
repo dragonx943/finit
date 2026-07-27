@@ -242,6 +242,8 @@ static cfg_opt_t svc_opts[] = {
 	CFG_INT     ("restart-max",  0,    CFGF_NODEFAULT),
 	CFG_INT     ("restart-sec",  0,    CFGF_NODEFAULT),
 	CFG_STR     ("oncrash",      NULL, CFGF_NODEFAULT),
+	CFG_STR     ("reload-signal", NULL, CFGF_NODEFAULT),
+	CFG_BOOL    ("required",     cfg_true, CFGF_NODEFAULT),
 	CFG_STR     ("stop-signal",  NULL, CFGF_NODEFAULT),
 	CFG_STR     ("halt",         NULL, CFGF_NODEFAULT),	/* alias */
 	CFG_INT     ("stop-timeout", 0,    CFGF_NODEFAULT),
@@ -1204,8 +1206,8 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	struct rlimit local_rlimit[RLIMIT_NLIMITS];
 	char line[LINE_SIZE] = "";
 	const char *str, *cmd, *grp;
+	int nowarn, own, bang;
 	unsigned int cnt;
-	int nowarn, own;
 	long num;
 	char buf[512];
 	char nm[80];
@@ -1226,8 +1228,46 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	if ((str = sec_getstr(sec, "runlevel", NULL)))
 		addtok(line, sizeof(line), "[%s]", str);
 
-	if (sec_getlist(sec, "conditions", "cond", buf, sizeof(buf)))
-		addtok(line, sizeof(line), "<%s>", buf);
+	/*
+	 * The ! leading a legacy condition list is not a condition at
+	 * all, and it means two unrelated things depending on the block
+	 * it sits in.  Each has its own key here, valid only where the
+	 * meaning applies, and both translate back to that same !.
+	 */
+	bang = 0;
+	if (type == SVC_TYPE_RUN || type == SVC_TYPE_TASK) {
+		if (cfg_size(sec, "required") && !sec_getbool(sec, "required"))
+			bang = 1;	/* do not hold up bootstrap */
+		if (cfg_size(sec, "reload-signal"))
+			logit(LOG_WARNING, "%s: %s: reload-signal does not apply"
+			      " to run or task, ignoring", file, cfg_title(sec));
+	} else {
+		if ((str = sec_getstr(sec, "reload-signal", NULL))) {
+			/*
+			 * Only SIGHUP and none survive the trip through a
+			 * legacy line, which carries the flag and not the
+			 * signal.
+			 */
+			if (!strcasecmp(str, "none"))
+				bang = 1;
+			else if (str2sig((char *)str) != SIGHUP)
+				logit(LOG_WARNING, "%s: %s: reload-signal is SIGHUP"
+				      " or none, ignoring '%s'", file,
+				      cfg_title(sec), str);
+		}
+		if (cfg_size(sec, "required"))
+			logit(LOG_WARNING, "%s: %s: required only applies to run"
+			      " or task, ignoring", file, cfg_title(sec));
+	}
+
+	if (sec_getlist(sec, "conditions", "cond", buf, sizeof(buf))) {
+		if (buf[0] == '!')
+			logit(LOG_WARNING, "%s: %s: '!' in conditions is not"
+			      " supported, use reload-signal or required",
+			      file, cfg_title(sec));
+		addtok(line, sizeof(line), "<%s%s>", bang ? "!" : "", buf);
+	} else if (bang)
+		addtok(line, sizeof(line), "<!>");
 
 	/* section title is the identity: NAME[:ID], %i in templates */
 	strlcpy(nm, cfg_title(sec), sizeof(nm));

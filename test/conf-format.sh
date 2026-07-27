@@ -182,3 +182,39 @@ run "initctl reload"
 retry 'assert_num_children 1 service.sh'
 assert "daemon-owned pidfile is not created by Finit" \
        "$(texec ls /run/notmine.pid 2>/dev/null)" = ""
+
+say 'reload-signal = none emits the legacy noreload flag'
+run "echo 'service service.sh {'                       >  $FINIT_CONF"
+run "echo '    description   = \"Test service\"'       >> $FINIT_CONF"
+run "echo '    reload-signal = \"none\"'               >> $FINIT_CONF"
+run "echo '    command       = \"service.sh\"'         >> $FINIT_CONF"
+run "echo '}'                                          >> $FINIT_CONF"
+run "initctl reload"
+
+retry 'assert_num_children 1 service.sh'
+assert_desc "Test service" service.sh
+
+say 'Case and short forms of SIGHUP are all the default, no flag'
+for s in SIGHUP sighup HUP hup; do
+	run "echo 'service service.sh {'                     >  $FINIT_CONF"
+	run "echo '    description   = \"Test service\"'     >> $FINIT_CONF"
+	run "echo \"    reload-signal = '$s'\"               >> $FINIT_CONF"
+	run "echo '    command       = \"service.sh\"'       >> $FINIT_CONF"
+	run "echo '}'                                        >> $FINIT_CONF"
+	run "initctl reload"
+	retry 'assert_num_children 1 service.sh'
+done
+
+# 'required' and 'reload-signal' both translate to the legacy ! that
+# leads the condition list, but each is valid only for the block types
+# where that ! carries its meaning.
+say 'required = false on a task does not hold up bootstrap'
+run "echo 'task pwrfail {'                             >  $FINIT_CONF"
+run "echo '    description = \"Power failure\"'        >> $FINIT_CONF"
+run "echo '    conditions  = { \"sys/pwr/fail\" }'     >> $FINIT_CONF"
+run "echo '    required    = false'                    >> $FINIT_CONF"
+run "echo '    command     = \"/bin/true\"'            >> $FINIT_CONF"
+run "echo '}'                                          >> $FINIT_CONF"
+run "initctl reload"
+
+retry 'assert_desc "Power failure" pwrfail'
