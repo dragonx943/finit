@@ -235,8 +235,10 @@ static cfg_opt_t svc_opts[] = {
 	CFG_BOOL    ("pidfile-create", cfg_false, CFGF_NODEFAULT),
 	CFG_STR     ("notify",       NULL, CFGF_NODEFAULT),
 	CFG_STR     ("type",         NULL, CFGF_NODEFAULT),
-	CFG_BOOL    ("manual",       cfg_false, CFGF_NODEFAULT),
-	CFG_BOOL    ("remain",       cfg_false, CFGF_NODEFAULT),
+	CFG_BOOL    ("manual-start", cfg_false, CFGF_NODEFAULT),
+	CFG_BOOL    ("manual",       cfg_false, CFGF_NODEFAULT),	/* alias */
+	CFG_BOOL    ("remain-after-exit", cfg_false, CFGF_NODEFAULT),
+	CFG_BOOL    ("remain",       cfg_false, CFGF_NODEFAULT),	/* alias */
 	CFG_BOOL    ("respawn",      cfg_false, CFGF_NODEFAULT),
 	CFG_STR     ("restart",      NULL, CFGF_NODEFAULT),
 	CFG_INT     ("restart-max",  0,    CFGF_NODEFAULT),
@@ -1038,9 +1040,10 @@ static char *sec_getlist(cfg_t *sec, const char *key, const char *alias, char *b
 	return buf;
 }
 
-static int sec_getbool(cfg_t *sec, const char *key)
+static int sec_getbool(cfg_t *sec, const char *key, const char *alias)
 {
-	if (!cfg_size(sec, key))
+	key = sec_key(sec, key, alias);
+	if (!key)
 		return 0;
 
 	return cfg_getbool(sec, key) == cfg_true;
@@ -1236,7 +1239,7 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	 */
 	bang = 0;
 	if (type == SVC_TYPE_RUN || type == SVC_TYPE_TASK) {
-		if (cfg_size(sec, "required") && !sec_getbool(sec, "required"))
+		if (cfg_size(sec, "required") && !sec_getbool(sec, "required", NULL))
 			bang = 1;	/* do not hold up bootstrap */
 		if (cfg_size(sec, "reload-signal"))
 			logit(LOG_WARNING, "%s: %s: reload-signal does not apply"
@@ -1305,7 +1308,7 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	 * pidfile plugin discovers on its own.
 	 */
 	str = sec_getstr(sec, "pidfile", NULL);
-	own = sec_getbool(sec, "pidfile-create");
+	own = sec_getbool(sec, "pidfile-create", NULL);
 
 	if (str && strcmp(str, "true") && strcmp(str, "false"))
 		addopt(line, sizeof(line), own ? "pid:" : "pid:!", str);
@@ -1323,11 +1326,11 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 			      file, str);
 	}
 
-	if (sec_getbool(sec, "manual"))
+	if (sec_getbool(sec, "manual-start", "manual"))
 		addtok(line, sizeof(line), "manual:yes");
-	if (sec_getbool(sec, "remain"))
+	if (sec_getbool(sec, "remain-after-exit", "remain"))
 		addtok(line, sizeof(line), "remain:yes");
-	if (sec_getbool(sec, "respawn"))
+	if (sec_getbool(sec, "respawn", NULL))
 		addtok(line, sizeof(line), "respawn");
 	if (nowarn)
 		addtok(line, sizeof(line), "nowarn");
@@ -1445,9 +1448,9 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 	} else if (cmd) {
 		addtok(line, sizeof(line), "%s", cmd);
 	} else {
-		if (sec_getbool(sec, "notty"))
+		if (sec_getbool(sec, "notty", NULL))
 			addtok(line, sizeof(line), "notty");
-		if (sec_getbool(sec, "rescue"))
+		if (sec_getbool(sec, "rescue", NULL))
 			addtok(line, sizeof(line), "rescue");
 
 		if (!line[0]) {
@@ -1457,11 +1460,11 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 		}
 	}
 
-	if (sec_getbool(sec, "noclear"))
+	if (sec_getbool(sec, "noclear", NULL))
 		addtok(line, sizeof(line), "noclear");
-	if (sec_getbool(sec, "nowait"))
+	if (sec_getbool(sec, "nowait", NULL))
 		addtok(line, sizeof(line), "nowait");
-	if (sec_getbool(sec, "nologin"))
+	if (sec_getbool(sec, "nologin", NULL))
 		addtok(line, sizeof(line), "nologin");
 
 	if (dev && (str = sec_getstr(sec, "term", NULL)))
@@ -1539,8 +1542,8 @@ static void conf_parse_statics(cfg_t *cfg)
 			if (runparts)
 				free(runparts);
 			runparts = strdup(str);
-			runparts_progress = sec_getbool(cfg, "runparts-progress");
-			runparts_sysv = sec_getbool(cfg, "runparts-sysv");
+			runparts_progress = sec_getbool(cfg, "runparts-progress", NULL);
+			runparts_sysv = sec_getbool(cfg, "runparts-sysv", NULL);
 		}
 
 		if (cfg_size(cfg, "runlevel")) {
@@ -1597,7 +1600,7 @@ static void conf_parse_statics(cfg_t *cfg)
 	}
 
 	if (cfg_size(cfg, "reboot-watchdog"))
-		wdtreboot = sec_getbool(cfg, "reboot-watchdog");
+		wdtreboot = sec_getbool(cfg, "reboot-watchdog", NULL);
 
 	if (cfg_size(cfg, "service-interval")) {
 		long val = cfg_getint(cfg, "service-interval");

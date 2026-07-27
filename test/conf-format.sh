@@ -218,3 +218,42 @@ run "echo '}'                                          >> $FINIT_CONF"
 run "initctl reload"
 
 retry 'assert_desc "Power failure" pwrfail'
+
+# remain-after-exit keeps a completed task in the service list, so it
+# is still visible and can be stopped.  The alias must reach the same
+# legacy token.
+for key in remain-after-exit remain; do
+	say "$key keeps a completed task visible"
+	run "echo 'task setup {'                               >  $FINIT_CONF"
+	run "echo '    description = \"Setup task\"'           >> $FINIT_CONF"
+	run "echo '    runlevel    = \"2345\"'                 >> $FINIT_CONF"
+	run "echo \"    $key = true\"                          >> $FINIT_CONF"
+	run "echo '    command     = \"/bin/true\"'            >> $FINIT_CONF"
+	run "echo '}'                                          >> $FINIT_CONF"
+	run "initctl reload"
+
+	retry 'assert_desc "Setup task" setup'
+done
+
+# manual-start registers the service but does not start it, so both
+# spellings must reach the legacy manual:yes token.
+for key in manual-start manual; do
+	say "$key leaves the service stopped until asked"
+	run "echo 'service service.sh {'                       >  $FINIT_CONF"
+	run "echo '    description = \"Manual service\"'       >> $FINIT_CONF"
+	run "echo \"    $key = true\"                          >> $FINIT_CONF"
+	run "echo '    command     = \"service.sh\"'           >> $FINIT_CONF"
+	run "echo '}'                                          >> $FINIT_CONF"
+	run "initctl reload"
+
+	retry 'assert_desc "Manual service" service.sh'
+	assert_num_children 0 service.sh
+
+	run "initctl start service.sh"
+	retry 'assert_num_children 1 service.sh'
+
+	# a started service survives the next reload, so clear it before
+	# the alias pass repeats the "stopped until asked" check
+	run "initctl stop service.sh"
+	retry 'assert_num_children 0 service.sh'
+done
