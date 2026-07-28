@@ -1,7 +1,7 @@
 run (sequence)
 --------------
 
-**Syntax:** `run [LVLS] <COND> /path/to/cmd ARGS -- Optional description`
+**Syntax:** `run NAME { command = "/path/to/cmd ARGS" }`
 
 > `<COND>` is described in the [Services](services.md) section.
 
@@ -31,7 +31,7 @@ also the `--quiet` and `--batch` options.
 task (parallel)
 ---------------
 
-**Syntax:** `task [LVLS] <COND> /path/to/cmd ARGS -- Optional description`
+**Syntax:** `task NAME { command = "/path/to/cmd ARGS" }`
 
 > `<COND>` is described in the [Services](services.md) section.
 
@@ -93,7 +93,7 @@ The firewall rules are created once.  The `exec-stop-post` script runs when
 entering runlevel 0 (halt) or 6 (reboot), or on explicit stop.
 
 > [!NOTE]
-> The `remain:yes` option is not supported for bootstrap-only tasks
-> (tasks with only runlevel S).  Bootstrap tasks are deleted immediately
-> after completion, and their `post:` scripts never run.  A warning is
-> logged if `remain:yes` is used on such tasks.
+> The `remain-after-exit` option is not supported for bootstrap-only
+> tasks (tasks with only runlevel S).  Bootstrap tasks are deleted
+> immediately after completion, and their `exec-stop-post` scripts never
+> run.  A warning is logged if `remain-after-exit` is used on such tasks.

@@ -1,16 +1,32 @@
 TTYs and Consoles
 =================
 
-**Syntax:** `tty [LVLS] <COND> DEV [BAUD] [noclear] [nowait] [nologin] [TERM]`  
-  `tty [LVLS] <COND> CMD <ARGS> [noclear] [nowait]`  
-  `tty [LVLS] <COND> [notty] [rescue]`
+**Syntax:** `tty NAME { device = DEV }` -- built-in getty  
+  `tty NAME { command = "CMD ARGS" }` -- external getty  
+  `tty NAME { notty = true }`, or `{ rescue = true }` -- bare shell, no device
 
-The first variant of this option uses the built-in getty on the given
-TTY device DEV, in the given runlevels.  DEV may be the special keyword
-`@console`, which is expanded from `/sys/class/tty/console/active`,
-useful on embedded systems.
+The block title NAME is what `initctl` shows.  The three variants differ
+in what they open: `device` runs the built-in getty on that TTY, and DEV
+may be the special keyword `@console`, expanded from
+`/sys/class/tty/console/active`, useful on embedded systems.  `command`
+hands the TTY to an external getty.  `notty` opens nothing at all.
 
-The default baud rate is 0, i.e., keep kernel default.
+Settings common to all three:
+
+| Setting | Alias | Description |
+|---|---|---|
+| `runlevel` | | Runlevels to run in, e.g. `"12345"` |
+| `conditions` | `cond` | Conditions to wait for |
+| `noclear` | | Do not clear the TTY after each session |
+| `nowait` | | Do not wait for Enter before the login prompt |
+| `nologin` | | Skip login, give a shell straight away |
+
+The `device` variant takes two more:
+
+| Setting | Description |
+|---|---|
+| `baud` | Baud rate, default 0, i.e., keep kernel default |
+| `term` | `$TERM` value, e.g. `"vt220"` |
 
 > The `tty` stanza inherits runlevel, condition (and other feature)
 > parsing from the `service` stanza.  So TTYs can run in one or many

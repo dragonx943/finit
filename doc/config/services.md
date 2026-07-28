@@ -1,7 +1,7 @@
 Services
 ========
 
-**Syntax:** `service [LVLS] <COND> /path/to/daemon ARGS -- Optional description`
+**Syntax:** `service NAME { command = "/path/to/daemon ARGS" }`
 
 Service, or daemon, to be monitored and automatically restarted if it
 exits prematurely.  Finit tries to restart services that die, by default

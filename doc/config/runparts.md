@@ -1,7 +1,7 @@
 Run-parts Scripts
 -----------------
 
-**Syntax:** `runparts [progress] [sysv] <DIR>`
+**Syntax:** `runparts = "DIR"`
 
 Call [run-parts(8)][] on `DIR` to run start scripts.  All executable
 files in the directory are called, in alphabetic order.  The scripts in
@@ -14,9 +14,10 @@ whatever the next runlevel is set to be (default 2).  E.g., generate a
 
 **Options:**
 
- - `progress`: display the progress of each script being executed
- - `sysv`: run only SysV style scripts, i.e., `SNNfoo`, or `KNNbar`,
-   where `NN` is a number (0-99).
+ - `runparts-progress = true`: display the progress of each script being
+   executed
+ - `runparts-sysv = true`: run only SysV style scripts, i.e., `SNNfoo`,
+   or `KNNbar`, where `NN` is a number (0-99).
 
 If global debug mode is enabled, the `runparts` program is also called
 with the debug flag.

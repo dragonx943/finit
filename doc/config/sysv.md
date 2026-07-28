@@ -9,7 +9,7 @@ from a serialized boot process.
 SysV Init Scripts
 -----------------
 
-**Syntax:** `sysv [LVLS] <COND> /path/to/init-script -- Optional description`
+**Syntax:** `sysv NAME { command = "/path/to/init-script" }`
 
 > `<COND>` is described in the [Services](services.md) section.
 
@@ -45,7 +45,7 @@ making it perfect for most scenarios.
 For syntax details, see the [Run-parts Scripts](runparts.md) section.
 Here is an example take from a Debian installation:
 
-    runparts /etc/rc2.d
+    runparts = "/etc/rc2.d"
 
 Files in these directories are usually named `SNNfoo` and `KNNfoo`,
 which Finit knows about and automatically appends the correct argument:

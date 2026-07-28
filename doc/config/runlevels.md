@@ -66,7 +66,7 @@ least the loopback interface is brought up.
 Runlevel Configuration
 ----------------------
 
-**Syntax:** `runlevel <N>`
+**Syntax:** `runlevel = N`
 
 The system runlevel to go to after bootstrap (S) has completed.  `N` is
 the runlevel number 0-9, where 6 is reserved for reboot and 0 for halt.
@@ -84,7 +84,7 @@ Finit disables networking in this mode.
 Networking
 ----------
 
-**Syntax:** `network <PATH>`
+**Syntax:** `network = "PATH"`
 
 Script or program to bring up networking, with optional arguments.
 
@@ -98,7 +98,7 @@ Debian, Ubuntu, Linux Mint, or an embedded BusyBox system.
 System Hostname
 ---------------
 
-**Syntax:** `host <NAME>`, or `hostname <NAME>`
+**Syntax:** `hostname = "NAME"`
 
 Set system hostname to NAME, unless `/etc/hostname` exists in which case
 the contents of that file is used.
@@ -111,10 +111,16 @@ Deprecated.  We recommend using `/etc/hostname` instead.
 Kernel Modules
 --------------
 
-**Syntax:** `module <MODULE> [ARGS]`
+**Syntax:** `modules = { "MODULE [ARGS]", ... }`, alias `mod`
 
-Load a kernel module, with optional arguments.  Similar to `insmod`
-command line tool.
+Load kernel modules, each with optional arguments.  Similar to the
+`insmod` command line tool.
+
+    modules = { "button", "evdev", "softdog" }
+
+> [!NOTE]
+> A list cannot hold comments; the lexer reads the entries after a `#`
+> regardless.  Put commented-out candidates above the list.
 
 Deprecated, there is both a `modules-load.so` and a `modprobe.so` plugin
 that can handle module loading better.  The former supports loading from
@@ -130,9 +136,9 @@ BusyBox mdev tool, add to `/etc/mdev.conf`:
 Resource Limits
 ---------------
 
-**Syntax:** `rlimit [hard|soft] RESOURCE <LIMIT|unlimited>`
+**Syntax:** `rlimit { RESOURCE = LIMIT }`, with `soft.` or `hard.` prefix
 
-Set the hard or soft limit for a resource, or both if that argument is
+Set the hard or soft limit for a resource, or both if the prefix is
 omitted.  `RESOURCE` is the lower-case `RLIMIT_` string constants from
 `setrlimit(2)`, without prefix.  E.g. to set `RLIMIT_CPU`, use `cpu`.
 
@@ -142,14 +148,11 @@ or the kernel `/proc/PID/limits` file, for details.  Finit versions
 before v3.1 used `infinity` for `unlimited`, which is still supported,
 albeit deprecated.
 
-    # No process is allowed more than 8MB of address space
-    rlimit hard as 8388608
-
-    # Core dumps may be arbitrarily large
-    rlimit soft core infinity
-
-    # CPU limit for all services, soft & hard = 10 sec
-    rlimit cpu 10
+    rlimit {
+        hard.as   = 8388608    # no more than 8MB of address space
+        soft.core = unlimited  # core dumps may be arbitrarily large
+        cpu       = 10         # soft & hard = 10 sec
+    }
 
 `rlimit` can be set globally, in `/etc/finit.conf`, or locally per
 each `/etc/finit.d/*.conf` read.  I.e., a set of task/run/service
@@ -158,7 +161,7 @@ stanzas can share the same rlimits if they are in the same .conf.
 Miscellaneous Settings
 ----------------------
 
-**Syntax:** `reboot-delay <0-60>`
+**Syntax:** `reboot-delay = 0-60`
 
 Optional delay at reboot (or shutdown or halt) to allow kernel
 filesystem threads to complete after calling `sync(2)` before
@@ -176,7 +179,7 @@ sync(2) has been called, twice.
 > writing; it can actually take a short time before all the blocks are
 > finally written.
 
-**Syntax:** `reboot-watchdog <on|off|true|false|1|0>`
+**Syntax:** `reboot-watchdog = true|false`
 
 Controls whether the system should reboot via the watchdog timer (WDT)
 or directly via the SoC/kernel.  When enabled, Finit will:

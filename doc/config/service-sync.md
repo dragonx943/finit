@@ -43,8 +43,8 @@ like this:
     service bar       { notify = "s6"       command = "bar"       }
     service qux       { notify = "none"     command = "qux"       }
 
-The `notify:none` syntax is for completeness in systems which run in
-`readiness pid` mode (default).  Services declared with `notify:none`
+The `notify = "none"` setting is for completeness in systems which run in
+`readiness pid` mode (default).  Services declared with `notify = "none"`
 will transition to ready as soon as Finit has started them, e.g.,
 `service/qux/ready`.
 

@@ -1,13 +1,13 @@
 General Logging
 ===============
 
-**Syntax:** `log size:200k count:5`
+**Syntax:** `log { size = 200k  count = 5 }`
 
 Log rotation for run/task/services using the `log` sub-option with
 redirection to a log file.  Global setting, applies to all services.
 
 The size can be given as bytes, without a specifier, or in `k`, `M`,
-or `G`, e.g. `size:10M`, or `size:3G`.  A value of `size:0` disables
+or `G`, e.g. `size = 10M`, or `size = 3G`.  A value of `size = 0` disables
 log rotation.  The default is `200k`.
 
 The count value is recommended to be between 1-5, with a default 5.

@@ -16,14 +16,17 @@ which is the same approach used by other modern service managers like dinit.
 
 ## Basic Usage
 
-Capabilities are specified using the `caps:` directive in service configuration:
+Capabilities are specified with the `capabilities` key, alias `caps`:
 
 ```conf
-service [2345] name:nginx \
-        @www-data:www-data \
-        caps:^cap_net_bind_service \
-        /usr/sbin/nginx -g 'daemon off;' \
-        -- Web server
+service nginx {
+    description  = "Web server"
+    runlevel     = "2345"
+    user         = "www-data"
+    group        = "www-data"
+    capabilities = { "^cap_net_bind_service" }
+    command      = "/usr/sbin/nginx -g 'daemon off;'"
+}
 ```
 
 This example allows nginx to bind to privileged ports (like 80 and 443) while
@@ -52,7 +55,7 @@ with the following prefixes:
 Multiple capabilities can be specified as a comma-separated list:
 
 ```conf
-caps:^cap_net_raw,^cap_net_admin,^cap_net_bind_service
+capabilities = { "^cap_net_raw", "^cap_net_admin", "^cap_net_bind_service" }
 ```
 
 ## Common Use Cases
@@ -62,10 +65,13 @@ caps:^cap_net_raw,^cap_net_admin,^cap_net_bind_service
 Allow a web server to bind to ports 80 and 443 without running as root:
 
 ```conf
-service [2345] name:webserver \
-        @www-data:www-data \
-        caps:^cap_net_bind_service \
-        /usr/sbin/nginx -g 'daemon off;'
+service webserver {
+    runlevel     = "2345"
+    user         = "www-data"
+    group        = "www-data"
+    capabilities = { "^cap_net_bind_service" }
+    command      = "/usr/sbin/nginx -g 'daemon off;'"
+}
 ```
 
 ### Network Monitoring (Raw Sockets)
@@ -73,10 +79,12 @@ service [2345] name:webserver \
 Allow packet capture without root privileges:
 
 ```conf
-service [2345] name:tcpdump \
-        @tcpdump \
-        caps:^cap_net_raw,^cap_net_admin \
-        /usr/sbin/tcpdump -i eth0 -w /var/log/capture.pcap
+service tcpdump {
+    runlevel     = "2345"
+    user         = "tcpdump"
+    capabilities = { "^cap_net_raw", "^cap_net_admin" }
+    command      = "/usr/sbin/tcpdump -i eth0 -w /var/log/capture.pcap"
+}
 ```
 
 ### NTP Daemon (System Time)
@@ -84,10 +92,12 @@ service [2345] name:tcpdump \
 Allow time synchronization without full root:
 
 ```conf
-service [2345] name:ntpd \
-        @ntp \
-        caps:^cap_sys_time,^cap_sys_nice \
-        /usr/sbin/ntpd -n
+service ntpd {
+    runlevel     = "2345"
+    user         = "ntp"
+    capabilities = { "^cap_sys_time", "^cap_sys_nice" }
+    command      = "/usr/sbin/ntpd -n"
+}
 ```
 
 ## Available Capabilities
@@ -116,9 +126,9 @@ Common capabilities include (see `man 7 capabilities` for the complete list):
    - Don't grant `cap_sys_admin` unless absolutely necessary
 
 2. **Specify a user (preferably non-root)**
-   - The `@user` directive is **required** for `caps:` to take effect
-   - For ambient capabilities (`^`), use a non-root user (not `@root`)
-   - Example: `@www-data`, `@nginx`, `@tcpdump`
+   - The `user` setting is **required** for `capabilities` to take effect
+   - For ambient capabilities (`^`), use a non-root user (not `"root"`)
+   - Example: `user = "www-data"`, `user = "nginx"`, `user = "tcpdump"`
 
 3. **Use ambient capabilities (`^`)**
    - The `^` prefix ensures capabilities survive exec()
@@ -163,17 +173,17 @@ ps -o user,pid,cmd -p $(pidof nginx)
 
 ## Limitations
 
-- The `caps:` directive requires `@user` to be specified for it to take effect
-  - Without `@user`, the service runs as root with full capabilities and
-    the `caps:` configuration is silently ignored
-  - You can use `@root` with `caps:`, but see below about ambient capabilities
+- `capabilities` requires `user` to be set for it to take effect
+  - Without `user`, the service runs as root with full capabilities and
+    the `capabilities` list is silently ignored
+  - You can use `user = "root"`, but see below about ambient capabilities
 - For ambient capabilities (`^`, recommended), the user **must be non-root**
-  - Using `@root` with `caps:^...` will not work effectively, as ambient
+  - Using `user = "root"` with `^` capabilities will not work effectively, as ambient
     capabilities are only added to the effective set when euid ≠ 0
-  - Use inheritable (`%`) or bounding (`!`) capabilities with `@root` if needed
-- Services without `caps:` use standard privilege dropping:
-  - Services with `@user` (non-root) have no special capabilities
-  - Services without `@user` run as root with full capabilities
+  - Use inheritable (`%`) or bounding (`!`) capabilities with `user = "root"` if needed
+- Services without `capabilities` use standard privilege dropping:
+  - Services with a non-root `user` have no special capabilities
+  - Services without `user` run as root with full capabilities
 - Some very old binaries may not work correctly with ambient capabilities
 - File system capabilities are not managed by Finit (use `setcap` for that)
 

@@ -180,7 +180,7 @@ document [Finit Services](../service.md).
 Alternate finit.d/
 ------------------
 
-**Syntax:** `rcsd /path/to/finit.d`
+**Syntax:** `rcsd = "/path/to/finit.d"`
 
 The Finit rcS.d directory is set at compile time with:
 
@@ -194,7 +194,7 @@ configurations, starting with the kernel command line option:
 This file in turn can use the `rcsd` directive to tell Finit to use
 another set of .conf files, e.g.:
 
-    rcsd /etc/factory.d
+    rcsd = "/etc/factory.d"
 
 > [!NOTE]
 > This directive is only available from the top-level bootstrap .conf
@@ -203,6 +203,6 @@ another set of .conf files, e.g.:
 Including Finit Configs
 ------------------------
 
-**Syntax:** `include <CONF>`
+**Syntax:** `include("CONF")`
 
 Include another configuration file.  Absolute path required.

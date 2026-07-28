@@ -10,69 +10,126 @@ See the [contrib/][contrib] directory on GitHub for examples, or take a
 peek at systems using Finit, like [Infix OS][infix] and [myLinux][].
 
 > [!TIP]
-> As of Finit v4.4, `.conf` lines can be broken up using the standard UNIX
-> continuation character (`\`), trailing comments are also supported.  The
-> latter means you must escape any hashes used in directives and descriptions
-> (`\#`).  For more on this and examples, see the [finit.conf(5)][] manual or
-> the [Configuration](config/index.md) section.
+> A block spans as many lines as it needs, so no continuation character is
+> called for.  For the full syntax, see the [finit.conf(5)][] manual or the
+> [Configuration](config/index.md) section.
 
 ```ApacheConf
 # Fallback if /etc/hostname is missing
-host default
+hostname = "default"
 
 # Runlevel to start after bootstrap, 'S', default: 2
-#runlevel 2
+#runlevel = 2
 
-# Support for setting global environment variables, using foo=bar syntax
-# be careful though with variables like PATH, SHELL, LOGNAME, etc.
-#PATH=/usr/bin:/bin:/usr/sbin:/sbin
+# Global environment variables, be careful though with variables like
+# PATH, SHELL, LOGNAME, etc.
+#environment {
+#    PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+#}
 
 # Max file size for each log file: 100 kiB, rotate max 4 copies:
 # log => log.1 => log.2.gz => log.3.gz => log.4.gz
-log size=100k count=4
+log {
+    size  = 100k
+    count = 4
+}
 
 # Services to be monitored and respawned as needed
-service [S12345] env:-/etc/conf.d/watchdog watchdog $WATCHDOG_OPTS $WATCHDOG_DEV -- System watchdog daemon
-service [S12345] env:-/etc/conf.d/syslog syslogd -n $SYSLOGD_OPTS          -- System log daemon
-service [S12345] <pid/syslogd> env:-/etc/conf.d/klogd klogd -n $KLOGD_OPTS -- Kernel log daemon
-service   [2345] env:-/etc/conf.d/lldpd lldpd -d $LLDPD_OPTS               -- LLDP daemon (IEEE 802.1ab)
+service watchdog {
+    description = "System watchdog daemon"
+    runlevel    = "S12345"
+    envfile     = "-/etc/conf.d/watchdog"
+    command     = "watchdog $WATCHDOG_OPTS $WATCHDOG_DEV"
+}
+service syslogd {
+    description = "System log daemon"
+    runlevel    = "S12345"
+    envfile     = "-/etc/conf.d/syslog"
+    command     = "syslogd -n $SYSLOGD_OPTS"
+}
+service klogd {
+    description = "Kernel log daemon"
+    runlevel    = "S12345"
+    conditions  = { "pid/syslogd" }
+    envfile     = "-/etc/conf.d/klogd"
+    command     = "klogd -n $KLOGD_OPTS"
+}
+service lldpd {
+    description = "LLDP daemon (IEEE 802.1ab)"
+    runlevel    = "2345"
+    envfile     = "-/etc/conf.d/lldpd"
+    command     = "lldpd -d $LLDPD_OPTS"
+}
 
 # The BusyBox ntpd does not use syslog when running in the foreground
 # So we use this trick to redirect stdout/stderr to a log file.  The
 # log file is rotated with the above settings.  The condition declares
-# a dependency on a system default route (gateway) to be set.  A single
-# <!> at the beginning means ntpd does not respect SIGHUP for restart.
-service [2345] log:/var/log/ntpd.log <!net/route/default> ntpd -n -l -I eth0 -- NTP daemon
+# a dependency on a system default route (gateway) to be set.  ntpd
+# does not respect SIGHUP, so Finit restarts it on reload instead.
+service ntpd {
+    description   = "NTP daemon"
+    runlevel      = "2345"
+    conditions    = { "net/route/default" }
+    reload-signal = "none"
+    log { file = "/var/log/ntpd.log" }
+    command       = "ntpd -n -l -I eth0"
+}
 
-# For multiple instances of the same service, add :ID somewhere between
-# the service/run/task keyword and the command.
-service :80   [2345] merecat -n -p 80   /var/www -- Web server
-service :8080 [2345] merecat -n -p 8080 /var/www -- Old web server
+# For multiple instances of the same service, add :ID to the block title.
+service merecat:80 {
+    description = "Web server"
+    runlevel    = "2345"
+    command     = "merecat -n -p 80 /var/www"
+}
+service merecat:8080 {
+    description = "Old web server"
+    runlevel    = "2345"
+    command     = "merecat -n -p 8080 /var/www"
+}
 
 # Alternative method instead of below runparts, can also use /etc/rc.local
-#sysv [S] /etc/init.d/keyboard-setup       -- Setting up preliminary keymap
-#sysv [S] /etc/init.d/acpid                -- Starting ACPI Daemon
-#task [S] /etc/init.d/kbd                  -- Preparing console
+#sysv keyboard-setup {
+#    description = "Setting up preliminary keymap"
+#    runlevel    = "S"
+#    command     = "/etc/init.d/keyboard-setup"
+#}
 
-# Hidden from boot progress, using empty `--` description
-#sysv [S] /etc/init.d/keyboard-setup       --
-#sysv [S] /etc/init.d/acpid                --
-#task [S] /etc/init.d/kbd                  --
+# Hidden from boot progress, using an empty description
+#sysv acpid {
+#    description = ""
+#    runlevel    = "S"
+#    command     = "/etc/init.d/acpid"
+#}
 
 # Run start scripts from this directory
-# runparts /etc/start.d
+#runparts = "/etc/start.d"
 
 # Virtual consoles run BusyBox getty, keep kernel default speed
-tty [12345] /sbin/getty -L 0 /dev/tty1  linux nowait noclear
-tty [2345]  /sbin/getty -L 0 /dev/tty2  linux nowait noclear
-tty [2345]  /sbin/getty -L 0 /dev/tty3  linux nowait noclear
+tty tty1 {
+    runlevel = "12345"
+    command  = "/sbin/getty -L 0 /dev/tty1 linux"
+    nowait   = true
+    noclear  = true
+}
+tty tty2 {
+    runlevel = "2345"
+    command  = "/sbin/getty -L 0 /dev/tty2 linux"
+    nowait   = true
+    noclear  = true
+}
+tty tty3 {
+    runlevel = "2345"
+    command  = "/sbin/getty -L 0 /dev/tty3 linux"
+    nowait   = true
+    noclear  = true
+}
 
 # Use built-in getty for serial port and USB serial
-#tty [12345] /dev/ttyAMA0 noclear nowait
-#tty [12345] /dev/ttyUSB0 noclear
+#tty ttyAMA0 { runlevel = "12345"  device = "/dev/ttyAMA0"  noclear = true  nowait = true }
+#tty ttyUSB0 { runlevel = "12345"  device = "/dev/ttyUSB0"  noclear = true }
 
 # Just give me a shell, I need to debug this embedded system!
-#tty [12345] console noclear nologin
+#tty console { runlevel = "12345"  device = "@console"  noclear = true  nologin = true }
 ```
 
 The `service` stanza, as well as `task`, `run` and others are described in
@@ -82,21 +139,18 @@ Here's a quick overview of some of the most common components needed to start
 a UNIX daemon:
 
 ```
-service [LVLS] <COND> log env:[-]/etc/default/daemon daemon ARGS -- Example daemon
-^       ^      ^      ^   ^                          ^      ^       ^
-|       |      |      |   |                          |      |        `---------- Optional description
-|       |      |      |   |                          |       `------------------ Daemon arguments
-|       |      |      |   |                           `------------------------- Path to daemon
-|       |      |      |    `---------------------------------------------------- Optional env. file
-|       |      |       `-------------------------------------------------------- Redirect output to log
-|       |       `--------------------------------------------------------------- Optional conditions
-|        `---------------------------------------------------------------------- Optional Runlevels
- `------------------------------------------------------------------------------ Supervised program (daemon)
+service NAME {                              <-- Supervised program (daemon)
+    description = "Example daemon"          <-- Optional description
+    runlevel    = "2345"                    <-- Optional runlevels
+    conditions  = { "net/route/default" }   <-- Optional conditions
+    envfile     = "-/etc/default/daemon"    <-- Optional env. file
+    log { }                                 <-- Redirect output to log
+    command     = "daemon ARGS"             <-- Path to daemon, and its arguments
+}
 ```
 
-Some components are optional: runlevel(s), condition(s) and description,
-making it easy to create simple start scripts and still possible for more
-advanced uses as well:
+Only `command` is required, which makes simple cases short while leaving
+room for more advanced uses:
 
     service sshd {
         command = "/usr/sbin/sshd -D"

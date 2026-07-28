@@ -71,7 +71,7 @@ For your convenience a set of *optional* plugins are available:
   comment character, `#`, or `;`, is skipped.
   
   Modules are by default loaded in runlevel `S` using the `task` stanza.
-  Each module gets a unique `name:modprobe.foo`, and optional`:ID`.  The
+  Each module is named `modprobe.foo`, with an optional `:ID`.  The
   runlevel can be changed per file using:
 
         set runlevel 2345
