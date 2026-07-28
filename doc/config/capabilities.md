@@ -169,7 +169,8 @@ ps -o user,pid,cmd -p $(pidof nginx)
 
 - Linux kernel 4.3+ (for ambient capabilities support)
 - libcap library installed
-- Finit built with `--enable-libcap`
+- Finit built with `--enable-libcap`, otherwise a `capabilities` list is
+  ignored, with a warning
 
 ## Limitations
 
@@ -181,6 +182,10 @@ ps -o user,pid,cmd -p $(pidof nginx)
   - Using `user = "root"` with `^` capabilities will not work effectively, as ambient
     capabilities are only added to the effective set when euid ≠ 0
   - Use inheritable (`%`) or bounding (`!`) capabilities with `user = "root"` if needed
+  - Finit warns about this when reading the .conf file:
+
+        nginx: ambient capabilities ('^') have no effect as root, use a
+        non-root user, or '%' and '!' entries
 - Services without `capabilities` use standard privilege dropping:
   - Services with a non-root `user` have no special capabilities
   - Services without `user` run as root with full capabilities

@@ -1537,11 +1537,26 @@ static void parse_caps(svc_t *svc, char *caps)
 		return;
 	}
 
+	if (!strcmp(svc->username, "root")) {
+		cap_value_t cap;
+
+		for (cap = 0; cap <= CAP_LAST_CAP; cap++) {
+			if (!cap_iab_get_vector(cap_iab, CAP_IAB_AMB, cap))
+				continue;
+
+			/* the ambient set only reaches effective when euid != 0 */
+			logit(LOG_WARNING, "%s: ambient capabilities ('^') have no effect"
+			      " as root, use a non-root user, or '%%' and '!' entries",
+			      svc_ident(svc, NULL, 0));
+			break;
+		}
+	}
+
 	cap_free(cap_iab);
 	strlcpy(svc->capabilities, caps, sizeof(svc->capabilities));
 #else
-	(void)svc;
-	(void)caps;
+	logit(LOG_WARNING, "%s: capabilities require Finit built with --enable-libcap,"
+	      " ignoring '%s'", svc_ident(svc, NULL, 0), caps);
 #endif
 }
 
