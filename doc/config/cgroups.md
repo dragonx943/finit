@@ -23,77 +23,66 @@ Finit provides three different cgroup directives for controlling resource alloca
 Top-level Cgroup Definition
 ----------------------------
 
-**Syntax:** `cgroup NAME settings`
+**Syntax:** `cgroup NAME { settings }`
 
     # Top-level cgroups and their default settings.  All groups mandatory
     # but more can be added, max 8 groups in total currently.  The cgroup
     # 'root' is also available, reserved for RT processes.  Settings are
     # as-is, only one shorthand 'mem.' exists, other than that it's the
     # cgroup v2 controller default names.
-    cgroup init   cpu.weight:100
-    cgroup user   cpu.weight:100
-    cgroup system cpu.weight:9800
+    cgroup init   { cpu.weight = 100  }
+    cgroup user   { cpu.weight = 100  }
+    cgroup system { cpu.weight = 9800 }
 
 Adding an extra cgroup `maint/` will require you to adjust the weight of
 the above three.  We leave `init/` and `user/` as-is reducing weight of
 `system/` to 9700.
 
-    cgroup system cpu.weight:9700
+    cgroup system { cpu.weight = 9700 }
 
     # Example extra cgroup 'maint'
-    cgroup maint  cpu.weight:100
+    cgroup maint  { cpu.weight = 100  }
 
 By default, the `system/` cgroup is selected for almost everything.  The
 `init/` cgroup is reserved for PID 1 itself and its closest relatives.
 The `user/` cgroup is for local TTY logins spawned by getty.
 
-Global Cgroup Selector
-----------------------
+Joining a Cgroup
+----------------
 
-**Syntax:** `cgroup.NAME[,options]` (standalone directive)
+**Syntax:** `cgroup NAME { settings }` (inside a service block)
 
-To select a different top-level cgroup, e.g. `maint/`, for a group of
-run/task/service directives in a `.conf` file, use the `cgroup.NAME`
-directive as a standalone line:
+Every block says which group it joins, by name.  An empty block joins
+without changing anything:
 
-    cgroup.maint
-    service [...] <...> /path/to/foo args -- description
-    service [...] <...> /path/to/bar args -- description
+    service foo {
+        cgroup maint {}
+        command = "/path/to/foo args"
+    }
 
-Both services will run in the `maint/` cgroup.
+    service bar {
+        cgroup maint {}
+        command = "/path/to/bar args"
+    }
 
-You can also include options with the global selector:
+Both services run in the `maint/` cgroup.  Settings inside the block
+apply to that service alone:
 
-    cgroup.system,delegate
-    service [...] <...> /path/to/foo args -- description
+    service foo {
+        cgroup maint {
+            cpu.max    = 10000
+            memory.max = 655360
+        }
+        command = "/path/to/foo args"
+    }
 
-Per-Service Cgroup Option
---------------------------
-
-**Syntax:** `cgroup.NAME[,options]` or `cgroup:options` (service option)
-
-To override the cgroup for a specific service, use the `cgroup.NAME`
-option within the service directive:
-
-    service [...] <...> cgroup.maint /path/to/foo args -- description
-
-This form also allows per-service limits. Two syntaxes are supported:
-
-**New comma-separated syntax (recommended):**
-
-    service [...] <...> cgroup.maint,cpu.max:10000,mem.max:655360 /path/to/foo args -- description
-
-**Old colon-separated syntax (legacy):**
-
-    service [...] <...> cgroup.maint:cpu.max:10000,mem.max:655360 /path/to/foo args -- description
-
-You can also apply options to the current default cgroup (without changing it)
-using the `cgroup:options` syntax:
-
-    service [...] <...> cgroup:cpu.max:10000,mem.max:655360 /path/to/foo args -- description
-
-Both syntaxes work identically. The new comma-separated syntax is recommended
-as it's more consistent with other option parsing in Finit.
+> [!NOTE]
+> The legacy format has a standalone `cgroup.NAME` line that selects a
+> group for every stanza following it in the file, and a `cgroup:options`
+> form that applies settings to whichever group is current without
+> naming it.  Neither has an equivalent here, by design: a block that
+> joins a group says so itself, so the group cannot depend on what came
+> earlier in the file.
 
 Note the `mem.` exception to the rule: every cgroup setting maps directly to
 cgroup v2 syntax. I.e., `cpu.max` maps to the file `/sys/fs/cgroup/maint/foo/cpu.max`.
@@ -108,40 +97,66 @@ configuration filename (without the `.conf` extension). For example, a
 service defined in `system/10-hotplug.conf` would create a cgroup at
 `/sys/fs/cgroup/system/10-hotplug/` by default.
 
-To use a more descriptive name (recommended for clarity), you can specify
-`name:` in the cgroup directive:
+To use a more descriptive name (recommended for clarity), set `name`
+inside the cgroup block:
 
-    service [...] <...> cgroup.system,name:udevd /lib/systemd/systemd-udevd -- Device event daemon
+    service udevd {
+        description = "Device event daemon"
+        cgroup system { name = "udevd" }
+        command     = "/lib/systemd/systemd-udevd"
+    }
 
 This creates the cgroup at `/sys/fs/cgroup/system/udevd/` instead.
 
-The syntax supports combining the name override with other options:
+`name` combines with any other setting:
 
-    service [...] <...> cgroup.system,name:udevd,cpu.max:10000 /lib/systemd/systemd-udevd -- Device event daemon
+    service udevd {
+        description = "Device event daemon"
+        cgroup system {
+            name    = "udevd"
+            cpu.max = 10000
+        }
+        command = "/lib/systemd/systemd-udevd"
+    }
 
 Or with delegation:
 
-    service [2345] @podman:podman \
-        cgroup.containers,name:podman,delegate,mem.max:4G \
-        /usr/bin/podman system service -- Podman API
+    service podman {
+        description = "Podman API"
+        runlevel    = "2345"
+        user        = "podman"
+        group       = "podman"
+        cgroup containers {
+            name       = "podman"
+            delegate   = true
+            memory.max = 4G
+        }
+        command = "/usr/bin/podman system service"
+    }
 
-A daemon using `SCHED_RR` currently needs to run outside the default cgroups.
+A daemon using `SCHED_RR` currently needs to run outside the default
+cgroups.
 
-    service [...] <...> cgroup.root /path/to/daemon arg -- Real-Time process
+    service rt {
+        description = "Real-Time process"
+        cgroup root {}
+        command     = "/path/to/daemon arg"
+    }
 
 Cgroup Delegation
 -----------------
 
 For services that need to create their own child cgroups (container runtimes
-like Docker, Podman, systemd-nspawn, LXC), use the `delegate` option:
+like Docker, Podman, systemd-nspawn, LXC), set `delegate`:
 
-    service [2345] @dockerd:dockerd \
-        cgroup.system,delegate /usr/bin/dockerd -- Docker daemon
-
-Or with the old colon syntax:
-
-    service [2345] @dockerd:dockerd \
-        cgroup.system:delegate /usr/bin/dockerd -- Docker daemon
+    service dockerd {
+        description = "Docker daemon"
+        runlevel    = "2345"
+        user        = "dockerd"
+        group       = "dockerd"
+        cgroup system { delegate = true }
+        command     = "/usr/bin/dockerd"
+    }
 
 This allows the container runtime to:
 
@@ -159,32 +174,46 @@ When delegation is enabled, Finit:
 
 **Requirements:**
 
-- The service should specify `@user:group` for proper ownership
+- The service should specify `user` and `group` for proper ownership
 - Controllers are delegated from the parent cgroup
 
-**Example with additional config (new syntax):**
+**Example with additional config:**
 
-    service [2345] @podman:podman \
-        cgroup.containers,delegate,mem.max:4G \
-        /usr/bin/podman system service -- Podman API
+    service podman {
+        description = "Podman API"
+        runlevel    = "2345"
+        user        = "podman"
+        group       = "podman"
+        cgroup containers {
+            delegate   = true
+            memory.max = 4G
+        }
+        command = "/usr/bin/podman system service"
+    }
 
-**Or with old syntax:**
-
-    service [2345] @podman:podman \
-        cgroup.containers:delegate,mem.max:4G \
-        /usr/bin/podman system service -- Podman API
-
-Both examples delegate the cgroup while also setting a 4GB memory limit.
+This delegates the cgroup while also setting a 4GB memory limit.
 
 **Container template example:**
 
 Here's a real-world example from [Infix OS](https://github.com/kernelkit/infix)
 for running rootful podman container instances using delegation:
 
-    sysv log:prio:local1,tag:%i kill:30 pid:!/run/container:%i.pid \
-        pre:0,/usr/sbin/container cleanup:0,/usr/sbin/container \
-        cgroup.system,delegate                                   \
-        [2345] <!> :%i container -n %i -- container %i
+    sysv container:%i {
+        description   = "container %i"
+        runlevel      = "2345"
+        reload-signal = "none"
+        pidfile       = "/run/container:%i.pid"
+        stop-timeout  = 30
+        log { priority = "local1"  identity = "%i" }
+
+        exec-start-pre         = "/usr/sbin/container"
+        exec-start-pre-timeout = 0
+        exec-cleanup           = "/usr/sbin/container"
+        exec-cleanup-timeout   = 0
+
+        cgroup system { delegate = true }
+        command = "container -n %i"
+    }
 
 This template uses `sysv` type with delegation, demonstrating that cgroup
 delegation works with different service types, not just `service`.

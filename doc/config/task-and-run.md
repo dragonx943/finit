@@ -40,27 +40,35 @@ One-shot like 'run', but starts in parallel with the next command.
 Both `run` and `task` commands are run in a shell, so basic pipes and
 redirects can be used:
 
-    task [s] echo "foo" | cat >/tmp/bar
+    task bar {
+        runlevel = "S"
+        command  = "echo \"foo\" | cat >/tmp/bar"
+    }
 
 Please note, `;`, `&&`, `||`, and similar are *not supported*.  Any
 non-trivial constructs are better placed in a separate shell script.
 
 
-remain:yes
-----------
+remain-after-exit
+-----------------
 
 By default, a `run` or `task` will re-run each time its runlevel is
-entered, and its `post:` script does not run on completion.
+entered, and its `exec-stop-post` script does not run on completion.
 
-With `remain:yes`, the task runs once and does not re-run on runlevel
-re-entry:
+With `remain-after-exit`, the task runs once and does not re-run on
+runlevel re-entry:
 
-    task [2345] remain:yes /usr/sbin/setup-firewall -- Firewall setup
+    task firewall {
+        description       = "Firewall setup"
+        runlevel          = "2345"
+        remain-after-exit = true
+        command           = "/usr/sbin/setup-firewall"
+    }
 
 This has the following effects:
 
   * The task does not re-run on runlevel re-entry
-  * The `post:` script runs when:
+  * The `exec-stop-post` script runs when:
     - The task is explicitly stopped (`initctl stop NAME`)
     - The task leaves its valid runlevels (e.g., runlevel change)
 
@@ -72,12 +80,16 @@ This is useful for tasks that set up persistent state where:
 **Example:** Setting up firewall rules with cleanup on shutdown:
 
 ```
-task [2345] remain:yes \
-     post:/usr/sbin/teardown-firewall \
-     /usr/sbin/setup-firewall -- Firewall setup
+task firewall {
+    description       = "Firewall setup"
+    runlevel          = "2345"
+    remain-after-exit = true
+    exec-stop-post    = "/usr/sbin/teardown-firewall"
+    command           = "/usr/sbin/setup-firewall"
+}
 ```
 
-The firewall rules are created once.  The `post:` script runs when
+The firewall rules are created once.  The `exec-stop-post` script runs when
 entering runlevel 0 (halt) or 6 (reboot), or on explicit stop.
 
 > [!NOTE]

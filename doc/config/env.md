@@ -6,15 +6,16 @@ and any `*.conf`, was added.  It is worth noting that these are global
 and *shared with all* services -- the only way to have a service-local
 environment is detailed in [Services Environment](service-env.md).
 
-The syntax for global environment variables is straight forward.  In
-Finit v4.4 the `set` keyword was added for completeness, but the old
-syntax (without the `set ` prefix) is still honored:
+Global environment variables go in an `environment` block, `env` for
+short:
 
-    set foo=bar
-    set baz="qux"
+    environment {
+        foo = "bar"
+        baz = "qux"
+    }
 
 On reload of .conf files, all tracked environment variables are cleared
-so if `foo=bar` is removed from `finit.conf`, or any `finit.d/*.conf`
+so if `foo` is removed from `finit.conf`, or any `finit.d/*.conf`
 file, it will no longer be used by Finit or any new (!) started
 run/tasks or services.  The environment of already started processes can
 not be changed.

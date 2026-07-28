@@ -27,13 +27,22 @@ Finit can *not* start and monitor a daemon that:
 
 ### Forks to bg w/ PID file
 
-There are two syntax variants, type 1 and type 2.  The former is the
-traditional one used also for `sysv` start/stop scripts, and the latter
-is inspired by systemd, with a twist -- it lets Finit guess the pifdile
-to look for based on the standard path and the basename of the command.
+There are two variants.  The former names the pidfile to watch, as for
+`sysv` start/stop scripts, and the latter is inspired by systemd, with a
+twist -- it lets Finit guess the pidfile based on the standard path and
+the basename of the command.
 
-    service pid:!/run/serv.pid serv       -- Forking service, type 1
-    service type:forking       serv       -- Forking service, type 2
+    service serv {
+        description = "Forking service, type 1"
+        pidfile     = "/run/serv.pid"
+        command     = "serv"
+    }
+
+    service serv {
+        description = "Forking service, type 2"
+        type        = "forking"
+        command     = "serv"
+    }
 
 In this example the resulting files to watch for are `/run/serv.pid` and
 `/var/run/serv.pid`, respectively.  On most modern Linux systems this is
@@ -41,17 +50,29 @@ the same directory (`/var/run` is a symlink to `../run`).
 
 ### Runs in fg w/ PID file
 
-    service                    serv -n -p -- Foreground service w/ PID file
+    service serv {
+        description = "Foreground service w/ PID file"
+        command     = "serv -n -p"
+    }
 
 ### Runs in fg w/o PID file
 
 Same as previous, but we tell Finit to create the PID file, because we
 need it to synchronize start/stop of a dependent service.
 
-    service pid:/run/serv.pid  serv -n    -- Foreground service w/o PID file
+    service serv {
+        description    = "Foreground service w/o PID file"
+        pidfile        = "/run/serv.pid"
+        pidfile-create = true
+        command        = "serv -n"
+    }
 
 ### Runs in fg w/ custom PID file
 
-    service pid:/run/servy.pid serv -n -p -P /run/servy.pid -- Foreground service w/ custom PID file
+    service serv {
+        description = "Foreground service w/ custom PID file"
+        pidfile     = "/run/servy.pid"
+        command     = "serv -n -p -P /run/servy.pid"
+    }
 
 [1]: config/service-sync.md

@@ -38,10 +38,10 @@ This will be made the default in Finit 5.0.  In this mode of operation,
 every service needs to explicitly declare their readiness notification,
 like this:
 
-    service notify:pid     watchdogd
-    service notify:systemd foo
-    service notify:s6      bar
-    service notify:none    qux
+    service watchdogd { notify = "pid"      command = "watchdogd" }
+    service foo       { notify = "systemd"  command = "foo"       }
+    service bar       { notify = "s6"       command = "bar"       }
+    service qux       { notify = "none"     command = "qux"       }
 
 The `notify:none` syntax is for completeness in systems which run in
 `readiness pid` mode (default).  Services declared with `notify:none`
@@ -50,8 +50,15 @@ will transition to ready as soon as Finit has started them, e.g.,
 
 To synchronize two services the following condition can be used:
 
-    service notify:pid                 watchdogd
-    service <service/watchdogd/ready>  stress-ng --cpu 8
+    service watchdogd {
+        notify  = "pid"
+        command = "watchdogd"
+    }
+
+    service stress-ng {
+        conditions = { "service/watchdogd/ready" }
+        command    = "stress-ng --cpu 8"
+    }
 
 For details on the syntax and options, see below.
 

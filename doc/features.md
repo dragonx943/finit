@@ -212,13 +212,17 @@ A fourth group also exists, the `root` group.  It is also _reserved_ and
 primarily intended for RT tasks.  If you have RT tasks they need to be
 declared as such in their service stanza like this:
 
-    service [...] <...> cgroup.root /path/to/foo args -- description
+    service foo {
+        cgroup root {}
+        command = "/path/to/foo args"
+    }
 
-or
+Every block names the group it joins, so a second RT task says so too:
 
-    cgroup.root
-    service [...] <...> /path/to/foo args -- description
-    service [...] <...> /path/to/bar args -- description
+    service bar {
+        cgroup root {}
+        command = "/path/to/bar args"
+    }
 
 See the [Cgroups](config/cgroups.md) section for more information, e.g.,
 how to configure per-group limits.

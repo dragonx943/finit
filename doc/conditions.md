@@ -14,11 +14,20 @@ specified separated by comma.  Multiple conditions are logically AND'ed
 during evaluation, i.e. all conditions must be satisfied in order for a
 service to run.
 
-Two special prefixes can be used inside the angle brackets:
+One prefix can be used on a condition:
 
- - `!` -- service does not support `SIGHUP` (noreload), or run/task
-   should not block runlevel changes (i.e., bootstrap)
  - `~` -- propagate reload from this dependency, see below
+
+The line-based format also accepts a leading `!` on the list, which is
+not a condition and not a negation.  It is a flag on the block, and it
+means two unrelated things depending on where it sits: a service does
+not support `SIGHUP` (noreload), or a run/task should not block
+runlevel changes, i.e. bootstrap.  Each of those is its own key here:
+
+| Line-based | Block format |
+|---|---|
+| `<!...>` on a service or sysv | `reload-signal = "none"` |
+| `<!...>` on a run or task | `required = false` |
 
 Finit guarantees by default that all run/tasks run (at least) once
 per runlevel.  For most tasks this is a good default, for example
@@ -27,7 +36,12 @@ that are unlikely to happen it is not. (See example below.)
 
 ### Example
 
-    service [2345] <pid/setupd,pid/zebra> /sbin/netd -- Network monitor
+    service netd {
+        description = "Network monitor"
+        runlevel    = "2345"
+        conditions  = { "pid/setupd", "pid/zebra" }
+        command     = "/sbin/netd"
+    }
 
 In this example the Network monitor daemon `netd` is not started until
 both the `pid/setupd` *and* `pid/zebra` conditions are satisfied.  A
@@ -42,15 +56,28 @@ being created, i.e., the service's default readiness notification.
 Another example is `dropbear`, it does not support `SIGHUP`, but we can
 also see optional sourcing of arguments from an environment file:
 
-    service [2345789] <!> env:-/etc/default/dropbear dropbear -F -R $DROPBEAR_ARGS -- Dropbear SSH daemon
+    service dropbear {
+        description   = "Dropbear SSH daemon"
+        runlevel      = "2345789"
+        reload-signal = "none"
+        envfile       = "-/etc/default/dropbear"
+        command       = "dropbear -F -R $DROPBEAR_ARGS"
+    }
 
 Finally, the weird "block runlevel changes" example.  Here we see what
 happens when Finit receives `SIGPWR`, sent from a power daemon like
 [powstatd(8)][].  A condition is asserted and a user can set up their
 own task to act on it.  We do not want this task to block Finit from
-moving to the next runlevel after bootstrap, so we set `<!>`:
+moving to the next runlevel after bootstrap, so we set
+`required = false`:
 
-    task [S0123456789] <!sys/pwr/fail> name:pwrfail initctl poweroff -- Power failure, shutting down
+    task pwrfail {
+        description = "Power failure, shutting down"
+        runlevel    = "S0123456789"
+        conditions  = { "sys/pwr/fail" }
+        required    = false
+        command     = "initctl poweroff"
+    }
 
 
 Propagating Reload in Dependencies
@@ -65,13 +92,23 @@ not care if it reloads its config.
 For services that need to react when their upstream reloads, the `~`
 prefix propagates the reload from the dependency:
 
-    service <pid/svc_a>   name:svc_b /sbin/svc_b -- Needs A (barrier)
-    service <!~pid/svc_b> name:svc_c /sbin/svc_c -- Propagate reload from B
+    service svc_b {
+        description = "Needs A (barrier)"
+        conditions  = { "pid/svc_a" }
+        command     = "/sbin/svc_b"
+    }
+
+    service svc_c {
+        description   = "Propagate reload from B"
+        conditions    = { "~pid/svc_b" }
+        reload-signal = "none"
+        command       = "/sbin/svc_c"
+    }
 
 Here, `<~pid/svc_b>` means: propagate a reload of `svc_b` to `svc_c`.
-When `svc_b` reloads, `svc_c` will be restarted (because of `!`,
-noreload) instead of merely resumed.  If `svc_c` supported `SIGHUP`
-(no `!` prefix), it would be sent `SIGHUP` instead.
+When `svc_b` reloads, `svc_c` will be restarted, because of
+`reload-signal = "none"`, instead of merely resumed.  If `svc_c`
+supported `SIGHUP`, it would be sent `SIGHUP` instead.
 
 This is similar to systemd's `PropagatesReloadTo=` directive, but
 declared on the consumer side rather than the provider side.
@@ -103,7 +140,12 @@ services, or run/task jobs, on external site-dependent stimuli.
 
 **Example:**
 
-    service [2345] <usr/foo> alarm --arg foo -- Foo alarm
+    service alarm {
+        description = "Foo alarm"
+        runlevel    = "2345"
+        conditions  = { "usr/foo" }
+        command     = "alarm --arg foo"
+    }
 
 For convenience, prefixing with `usr/` is allowed, but any other slashes
 or period characters are disallowed.  E.g., to trigger the `Foo alarm`,
@@ -126,8 +168,9 @@ Static (one-shot) conditions, like `usr/`, never enter the `flux` state.
 > "touch" or recreate, their PID file on `SIGHUP`.  This can be done by
 > calling `utimensat()` on the PID file.  Provided, of course, that the
 > service supports reloading on `SIGHUP`, otherwise it will be restarted
-> by Finit when they instead exit on the signal.  For such services, use
-> `<!>` to tell Finit the service does not support `SIGHUP`.
+> by Finit when they instead exit on the signal.  For such services,
+> set `reload-signal = "none"` to tell Finit the service does not
+> support `SIGHUP`.
 
 
 Built-in Conditions
@@ -307,8 +350,8 @@ restarts that would otherwise occur because a depending service was sent
 
 Services with the `~` prefix are an exception to this rule: when their
 conditions return to `on` after being in `flux`, the reload is propagated
--- the service is reloaded (SIGHUP) or restarted (noreload `!`) instead
-of simply being resumed.
+-- the service is reloaded (SIGHUP), or restarted if it has
+`reload-signal = "none"`, instead of simply being resumed.
 
 Therefore, any plugin that supplies Finit with conditions must ensure
 that their state is updated after each reconfiguration.  This can be

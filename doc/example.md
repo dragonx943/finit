@@ -98,29 +98,52 @@ Some components are optional: runlevel(s), condition(s) and description,
 making it easy to create simple start scripts and still possible for more
 advanced uses as well:
 
-    service /usr/sbin/sshd -D
+    service sshd {
+        command = "/usr/sbin/sshd -D"
+    }
 
 Dependencies are handled using [conditions](conditions.md).  One of
 the most common conditions is to wait for basic networking to become
 available:
 
-    service <net/route/default> nginx -- High performance HTTP server
+    service nginx {
+        description = "High performance HTTP server"
+        conditions  = { "net/route/default" }
+        command     = "nginx"
+    }
 
 Here is another example where we instruct Finit to not start BusyBox
 `ntpd` until `syslogd` has started properly.  Finit waits for `syslogd`
 to create its PID file, by default `/var/run/syslogd.pid`.
 
-    service [2345] log <!pid/syslogd> ntpd -n -N -p pool.ntp.org
-    service [S12345] syslogd -n -- Syslog daemon
+    service ntpd {
+        runlevel      = "2345"
+        conditions    = { "pid/syslogd" }
+        reload-signal = "none"
+        log { }
+        command       = "ntpd -n -N -p pool.ntp.org"
+    }
 
-Notice the `log` keyword, BusyBox `ntpd` uses `stderr` for logging when
-run in the foreground.  With `log` Finit redirects `stdout` + `stderr`
-to the system log daemon using the command line `logger(1)` tool.
+    service syslogd {
+        description = "Syslog daemon"
+        runlevel    = "S12345"
+        command     = "syslogd -n"
+    }
+
+Notice the empty `log` block, BusyBox `ntpd` uses `stderr` for logging
+when run in the foreground.  With it Finit redirects `stdout` +
+`stderr` to the system log daemon using the command line `logger(1)`
+tool.
 
 A service, or task, can have multiple dependencies listed.  Here we wait
 for *both* `syslogd` to have started and basic networking to be up:
 
-    service [2345] log <pid/syslogd,net/route/default> ntpd -n -N -p pool.ntp.org
+    service ntpd {
+        runlevel   = "2345"
+        conditions = { "pid/syslogd", "net/route/default" }
+        log { }
+        command    = "ntpd -n -N -p pool.ntp.org"
+    }
 
 If either condition fails, e.g. loss of networking, `ntpd` is stopped
 and as soon as it comes back up again `ntpd` is restarted automatically.

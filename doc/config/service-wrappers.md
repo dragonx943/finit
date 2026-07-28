@@ -14,7 +14,12 @@ example employs a wrapper script in `/etc/start.d`.
 
 * `/etc/finit.d/available/program.conf`:
 
-        service [235] <!> /etc/start.d/program -- Example Program
+        service program {
+            description   = "Example Program"
+            runlevel      = "235"
+            reload-signal = "none"
+            command       = "/etc/start.d/program"
+        }
 
 * `/etc/start.d/program:`
 

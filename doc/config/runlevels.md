@@ -26,8 +26,16 @@ the lifetime of your system.
 
 Example:
 
-    task [S] /lib/console-setup/console-setup.sh
-    service [S12345] env:-/etc/default/rsyslog rsyslogd -n $RSYSLOGD_ARGS
+    task console-setup {
+        runlevel = "S"
+        command  = "/lib/console-setup/console-setup.sh"
+    }
+
+    service rsyslogd {
+        runlevel = "S12345"
+        envfile  = "-/etc/default/rsyslog"
+        command  = "rsyslogd -n $RSYSLOGD_ARGS"
+    }
 
 When bootstrap has completed, Finit moves to runlevel 2.  This can be
 changed in `/etc/finit.conf` using the `runlevel N` directive, or by a

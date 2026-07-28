@@ -24,9 +24,10 @@ calls `init-script restart` on `initctl reload`.  Similar to how
 `service` stanzas work.
 
 Forking services started with `sysv` scripts can be monitored by Finit
-by declaring the PID file to look for: `pid:!/path/to/pidfile.pid`.
-Notice the leading `!`, it signifies Finit should not try to create the
-file, but rather watch that file for the resulting forked-off PID.  This
+by declaring the PID file to look for: `pidfile = "/path/to/file.pid"`.
+Finit does not create that file, it watches it for the resulting
+forked-off PID, which is the default; `pidfile-create = true` is what
+asks Finit to write it instead.  This
 syntax also works for forking daemons that do not have a command line
 option to run it in the foreground, more on this below in `service`.
 
@@ -64,7 +65,12 @@ Start/Stop Scripts
 For syntax details, see [SysV Init Scripts](#sysv-init-scripts), above.
 Here follows an example taken from a Debian installation:
 
-    sysv [2345] <pid/syslogd> /etc/init.d/openbsd-inetd -- OpenBSD inet daemon
+    sysv inetd {
+        description = "OpenBSD inet daemon"
+        runlevel    = "2345"
+        conditions  = { "pid/syslogd" }
+        command     = "/etc/init.d/openbsd-inetd"
+    }
 
 The init script header could be parsed to extract `Default-Start:` and
 other parameters for the `sysv` command to Finit.  There is currently no

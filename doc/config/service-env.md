@@ -13,7 +13,12 @@ file `/etc/default/foo`.  Like this:
 
 * `/etc/finit.conf`:
 
-        service [2345] env:-/etc/default/foo foo -n $FOO_OPTIONS -- Example foo daemon
+        service foo {
+            description = "Example foo daemon"
+            runlevel    = "2345"
+            envfile     = "-/etc/default/foo"
+            command     = "foo -n $FOO_OPTIONS"
+        }
 
 Here the service `foo` is started with `-n`, to make sure it runs in the
 foreground, and the with the options found in the environment file.  With
@@ -22,6 +27,8 @@ the `ps` command we can see that the process is started with:
     foo -n --extra-arg=bar -s -x
 
 > [!NOTE]
-> The leading `-` in `env:` determines if Finit should treat a missing
-> environment file as blocking the start of the service or not.  When
-> `-` is used, a missing environment file does *not* block the start.
+> The leading `-` on `envfile` determines if Finit should treat a
+> missing environment file as blocking the start of the service or not.
+> When `-` is used, a missing environment file does *not* block the
+> start.  The same mark works on `command`, where it means carry on if
+> the binary is missing.

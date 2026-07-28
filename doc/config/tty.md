@@ -19,7 +19,13 @@ The default baud rate is 0, i.e., keep kernel default.
 
 **Example:**
 
-    tty [12345] /dev/ttyAMA0 115200 noclear vt220
+    tty ttyAMA0 {
+        runlevel = "12345"
+        device   = "/dev/ttyAMA0"
+        baud     = 115200
+        term     = "vt220"
+        noclear  = true
+    }
 
 The second `tty` syntax variant is for using an external getty, like
 agetty or the BusyBox getty.
@@ -38,8 +44,16 @@ the user to press enter before starting getty.
 
 **Example:**
 
-    tty [12345] /sbin/getty  -L 115200 /dev/ttyAMA0 vt100
-    tty [12345] /sbin/agetty -L ttyAMA0 115200 vt100 nowait
+    tty getty {
+        runlevel = "12345"
+        command  = "/sbin/getty -L 115200 /dev/ttyAMA0 vt100"
+    }
+
+    tty agetty {
+        runlevel = "12345"
+        command  = "/sbin/agetty -L ttyAMA0 115200 vt100"
+        nowait   = true
+    }
 
 The `noclear` option disables clearing the TTY after each session.
 Clearing the TTY when a user logs out is usually preferable.
@@ -69,13 +83,21 @@ can be omitted to keep the kernel default.
 
 **Example:**
 
-    tty [12345] @console noclear vt220
+    tty console {
+        runlevel = "12345"
+        device   = "@console"
+        term     = "vt220"
+        noclear  = true
+    }
 
 On really bare bones systems, or for board bringup, Finit can give you a
 shell prompt as soon as bootstrap is done, without opening any device
 node:
 
-    tty [12345789] notty
+    tty board {
+        runlevel = "12345789"
+        notty    = true
+    }
 
 This should of course not be enabled on production systems.  Because it
 may give a user root access without having to log in.  However, for
@@ -83,7 +105,10 @@ board bringup and system debugging it can come in handy.
 
 One can also use the `service` stanza to start a stand-alone shell:
 
-    service [12345] /bin/sh -l
+    service shell {
+        runlevel = "12345"
+        command  = "/bin/sh -l"
+    }
 
 Controlling TTY for Services
 ----------------------------
@@ -109,5 +134,16 @@ TTY device.
 
 **Example:**
 
-    service [2345] tty:/dev/ttyS0 /usr/sbin/foo -- Foo on serial console
-    task [S] tty:@console my-setup-script -- Board bringup on console
+    service foo {
+        description = "Foo on serial console"
+        runlevel    = "2345"
+        tty         = "/dev/ttyS0"
+        command     = "/usr/sbin/foo"
+    }
+
+    task setup {
+        description = "Board bringup on console"
+        runlevel    = "S"
+        tty         = "@console"
+        command     = "my-setup-script"
+    }
