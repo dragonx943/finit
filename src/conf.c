@@ -136,6 +136,14 @@ static TAILQ_HEAD(, conf_change) conf_change_list = TAILQ_HEAD_INITIALIZER(conf_
  *      cfg_error_cb() buffers it and only a failed parse is reported.
  */
 static cfg_opt_t cgroup_opts[] = {
+	/*
+	 * Not cgroupfs files but arguments to parse_cgroup(): the leaf
+	 * directory to place the service in, and whether to hand the
+	 * subtree over to it.  Only meaningful inside a service block.
+	 */
+	CFG_STR ("name",     NULL,      CFGF_NODEFAULT),
+	CFG_BOOL("delegate", cfg_false, CFGF_NODEFAULT),
+
 	CFG_STR("cpu.weight",          NULL, CFGF_NODEFAULT),
 	CFG_STR("cpu.weight.nice",     NULL, CFGF_NODEFAULT),
 	CFG_STR("cpu.max",             NULL, CFGF_NODEFAULT),
@@ -1079,11 +1087,27 @@ static void addopt(char *line, size_t len, const char *opt, const char *val)
  * cgroup NAME { key = val ... } -> "NAME" + "key:val,key:val"
  * Free-form (KEYSTRVAL) and declared options enumerate the same way.
  */
-static char *cgroup_settings(cfg_t *cg, char *buf, size_t len)
+static char *cgroup_settings(cfg_t *cg, char *buf, size_t len, char *file, int svc)
 {
 	cfg_opt_t *opt;
 
 	buf[0] = 0;
+
+	/*
+	 * delegate is a flag, so it carries no value, and a top-level
+	 * group has nothing to delegate to.
+	 */
+	if (cfg_size(cg, "delegate")) {
+		if (!svc)
+			logit(LOG_WARNING, "%s: cgroup %s: delegate only applies"
+			      " inside a service, ignoring", file, cfg_title(cg));
+		else if (cfg_getbool(cg, "delegate") == cfg_true)
+			strlcat(buf, "delegate", len);
+	}
+	if (!svc && cfg_size(cg, "name"))
+		logit(LOG_WARNING, "%s: cgroup %s: name only applies inside a"
+		      " service, ignoring", file, cfg_title(cg));
+
 	for (opt = cg->opts; opt && opt->name; opt++) {
 		const char *val;
 
@@ -1092,6 +1116,8 @@ static char *cgroup_settings(cfg_t *cg, char *buf, size_t len)
 
 		val = cfg_opt_getnstr(opt, 0);
 		if (!val)
+			continue;
+		if (!svc && !strcmp(opt->name, "name"))
 			continue;
 
 		if (buf[0])
@@ -1394,7 +1420,7 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 			      " using '%s'", file, cfg_title(sec), cnt,
 			      cfg_title(cg));
 
-		cgroup_settings(cg, buf, sizeof(buf));
+		cgroup_settings(cg, buf, sizeof(buf), file, 1);
 		if (buf[0])
 			addtok(line, sizeof(line), "cgroup.%s,%s", cfg_title(cg), buf);
 		else
@@ -1666,7 +1692,7 @@ static int conf_parse_cfg(cfg_t *cfg, char *file, int is_rcsd)
 		char buf[512];
 
 		cgroup_add((char *)cfg_title(cg),
-			   cgroup_settings(cg, buf, sizeof(buf)), 0);
+			   cgroup_settings(cg, buf, sizeof(buf), file, 0), 0);
 	}
 
 	/* file-scope resource limits, applies to all services in file */

@@ -257,3 +257,20 @@ for key in manual-start manual; do
 	run "initctl stop service.sh"
 	retry 'assert_num_children 0 service.sh'
 done
+
+# delegate is a flag to parse_cgroup(), not a cgroupfs file, and the
+# cgroup leaf name is an argument too.  Both must come out of the
+# translator in the comma-separated form that parser expects.
+say 'cgroup delegate and name translate as parse_cgroup arguments'
+run "echo 'service service.sh {'                       >  $FINIT_CONF"
+run "echo '    description = \"Delegated\"'            >> $FINIT_CONF"
+run "echo '    cgroup system {'                        >> $FINIT_CONF"
+run "echo '        name       = \"mysvc\"'             >> $FINIT_CONF"
+run "echo '        delegate   = true'                  >> $FINIT_CONF"
+run "echo '        cpu.weight = 250'                   >> $FINIT_CONF"
+run "echo '    }'                                      >> $FINIT_CONF"
+run "echo '    command     = \"service.sh\"'           >> $FINIT_CONF"
+run "echo '}'                                          >> $FINIT_CONF"
+run "initctl reload"
+
+retry 'assert_desc "Delegated" service.sh'
