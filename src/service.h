@@ -27,6 +27,22 @@
 
 #include "svc.h"
 
+/*
+ * systemd-style per-service directories, block format only: the .conf
+ * key, the base the name resolves under, and the environment variable
+ * the path is exported as.  Shared by service.c and conf.c so adding
+ * one means touching the table and svc.h alone.
+ */
+struct svcdir {
+	const char *key;
+	const char *base;
+	const char *env;
+	size_t      off;	/* offsetof() in svc_t */
+};
+#define NUM_SVCDIRS 5
+extern const struct svcdir svcdirs[NUM_SVCDIRS];
+
+int	  service_set_dir	 (svc_t *svc, const struct svcdir *sd, const char *name);
 svc_t	 *service_register	 (int type, char *line, struct rlimit rlimit[], char *file);
 void      service_unregister     (svc_t *svc);
 

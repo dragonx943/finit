@@ -570,6 +570,101 @@ static void set_uid(uid_t uid, svc_t *svc)
 		err(1, "%s: failed setuid(%d)", svc_ident(svc, NULL, 0), uid);
 }
 
+/*
+ * systemd-style per-service directories: created before each start,
+ * owned by the service user, and exported to the environment.  The
+ * runtime directory is removed again when the service stops, after
+ * any post: script has run.  See issue #492.
+ */
+const struct svcdir svcdirs[NUM_SVCDIRS] = {
+	{ "runtime-dir", "/run",       "RUNTIME_DIRECTORY",       offsetof(svc_t, runtime_dir) },
+	{ "state-dir",   "/var/lib",   "STATE_DIRECTORY",         offsetof(svc_t, state_dir)   },
+	{ "cache-dir",   "/var/cache", "CACHE_DIRECTORY",         offsetof(svc_t, cache_dir)   },
+	{ "logs-dir",    "/var/log",   "LOGS_DIRECTORY",          offsetof(svc_t, logs_dir)    },
+	{ "config-dir",  "/etc",       "CONFIGURATION_DIRECTORY", offsetof(svc_t, config_dir)  },
+};
+
+static char *svcdir_path(svc_t *svc, const struct svcdir *sd, char *path, size_t len)
+{
+	char *name = (char *)svc + sd->off;
+
+	if (!name[0])
+		return NULL;
+
+	paste(path, len, sd->base, name);
+	return path;
+}
+
+/*
+ * Validate and set a per-service directory.  The value is a name
+ * resolved under sd->base, so an absolute path or an escape is
+ * refused with -1 and errno set.
+ */
+int service_set_dir(svc_t *svc, const struct svcdir *sd, const char *name)
+{
+	char *dir = (char *)svc + sd->off;
+
+	if (name[0] == '/' || strstr(name, "..")) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (strlcpy(dir, name, MAX_ARG_LEN) >= MAX_ARG_LEN) {
+		dir[0] = 0;
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	return 0;
+}
+
+static void service_mkdirs(svc_t *svc)
+{
+	char path[256];
+	size_t i;
+
+	for (i = 0; i < NELEMS(svcdirs); i++) {
+		char *ptr;
+
+		ptr = svcdir_path(svc, &svcdirs[i], path, sizeof(path));
+		if (!ptr)
+			continue;
+
+		/*
+		 * Script forks land here too, so an existing directory
+		 * is left alone -- mode and ownership are asserted at
+		 * creation only, a daemon may have tightened them.
+		 */
+		if (fisdir(ptr))
+			continue;
+
+		/* only the named directory is chowned, like systemd */
+		mkpath(ptr, 0755);
+		if (mksubsys(ptr, 0755, svc->username, svc->group))
+			logit(LOG_WARNING, "%s: failed creating %s", svc_ident(svc, NULL, 0), ptr);
+	}
+}
+
+static void service_dir_env(svc_t *svc)
+{
+	char path[256];
+	size_t i;
+
+	for (i = 0; i < NELEMS(svcdirs); i++) {
+		if (svcdir_path(svc, &svcdirs[i], path, sizeof(path)))
+			setenv(svcdirs[i].env, path, 1);
+	}
+}
+
+static void service_rmdirs(svc_t *svc)
+{
+	char path[256];
+
+	/* only the runtime directory, /run is tmpfs, the rest persist */
+	if (svcdir_path(svc, &svcdirs[0], path, sizeof(path)))
+		rmrf(path);
+}
+
 static pid_t service_fork(svc_t *svc)
 {
 	const char *cgnm;
@@ -591,6 +686,8 @@ static pid_t service_fork(svc_t *svc)
 
 	if (pid == 0) {
 		char *home = NULL;
+
+		service_mkdirs(svc);
 #ifdef ENABLE_STATIC
 		int uid = 0; /* XXX: Fix better warning that dropprivs is disabled. */
 		int gid = 0;
@@ -663,6 +760,8 @@ static pid_t service_fork(svc_t *svc)
 			if (setgid(gid))
 				err(1, "%s: failed setgid(%d)", svc_ident(svc, NULL, 0), gid);
 		}
+
+		service_dir_env(svc);
 
 		if (uid >= 0) {
 			set_uid(uid, svc);
@@ -2272,6 +2371,10 @@ svc_t *service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 	else
 		memset(svc->capabilities, 0, sizeof(svc->capabilities));
 
+	/* block format only, set by conf.c after registration */
+	for (int i = 0; i < NUM_SVCDIRS; i++)
+		memset((char *)svc + svcdirs[i].off, 0, MAX_ARG_LEN);
+
 	if (!svc_is_tty(svc) && ctty) {
 		char *dev = ctty;
 
@@ -2893,6 +2996,16 @@ static void svc_set_state(svc_t *svc, svc_state_t new_state)
 	if (svc->state == new_state)
 		return;
 	*state = new_state;
+
+	/*
+	 * The unit has stopped: HALTED comes after any post:/cleanup:
+	 * script, DONE is a completed run/task, where remain-after-exit
+	 * keeps it alive until stopped for real.  Same removal rules as
+	 * systemd RuntimeDirectory with RuntimeDirectoryPreserve=no.
+	 */
+	if (new_state == SVC_HALTED_STATE ||
+	    (new_state == SVC_DONE_STATE && !svc_is_remain(svc)))
+		service_rmdirs(svc);
 
 	if (svc_is_runtask(svc)) {
 		char success[MAX_COND_LEN], failure[MAX_COND_LEN];

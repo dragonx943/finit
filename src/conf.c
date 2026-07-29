@@ -269,6 +269,11 @@ static cfg_opt_t svc_opts[] = {
 
 	CFG_STR_LIST("capabilities", NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("caps",         NULL, CFGF_NODEFAULT),	/* alias */
+	CFG_STR     ("runtime-dir",  NULL, CFGF_NODEFAULT),
+	CFG_STR     ("state-dir",    NULL, CFGF_NODEFAULT),
+	CFG_STR     ("cache-dir",    NULL, CFGF_NODEFAULT),
+	CFG_STR     ("logs-dir",     NULL, CFGF_NODEFAULT),
+	CFG_STR     ("config-dir",   NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("conflicts",    NULL, CFGF_NODEFAULT),
 	CFG_STR     ("if",           NULL, CFGF_NODEFAULT),
 	CFG_STR     ("tty",          NULL, CFGF_NODEFAULT),
@@ -1289,6 +1294,30 @@ static int if_translate(const char *str, char *buf, size_t len, char *file, cons
 	return 0;
 }
 
+/*
+ * These have no legacy token, they are validated by service_set_dir()
+ * and stored directly on the registered svc.  Empty means unset,
+ * service_register() has already cleared the fields.
+ */
+static void dirs_translate(cfg_t *sec, svc_t *svc, char *file)
+{
+	int i;
+
+	for (i = 0; i < NUM_SVCDIRS; i++) {
+		const char *str;
+
+		str = sec_getstr(sec, svcdirs[i].key, NULL);
+		if (!str || !str[0])
+			continue;
+
+		if (service_set_dir(svc, &svcdirs[i], str))
+			logit(LOG_ERR, "%s: %s: %s '%s' %s, ignoring",
+			      file, cfg_title(sec), svcdirs[i].key, str,
+			      errno == ENAMETOOLONG ? "is too long"
+			      : "must be relative, no '..'");
+	}
+}
+
 static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *file)
 {
 	struct rlimit local_rlimit[RLIMIT_NLIMITS];
@@ -1299,6 +1328,7 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	long num;
 	char buf[512];
 	char nm[80];
+	svc_t *svc;
 	char *id;
 
 	cmd = sec_getstr(sec, "command", NULL);
@@ -1505,7 +1535,11 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 		addtok(line, sizeof(line), "-- %s", str);
 
 	dbg("translated: %s", line);
-	service_register(type, line, rlimit, file);
+	svc = service_register(type, line, rlimit, file);
+	if (!svc)
+		return;
+
+	dirs_translate(sec, svc, file);
 }
 
 /*

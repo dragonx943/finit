@@ -34,7 +34,12 @@ BBBIN           = busybox-$(ARCH)
 BBHOME         ?= https://github.com/troglobit/busybox-builder/releases/download
 BBURL          ?= $(BBHOME)/$(BBVER)/$(BBBIN)
 
-_libs_src       = $(shell ldd $(FINITBIN) | grep -Eo '/[^ ]+')
+# glibc dlopen()s NSS modules at runtime, so ldd does not list them, but
+# without libnss_files getpwnam() cannot resolve users inside the chroot
+_libs_nss       = $(firstword $(wildcard /lib/$(ARCH)-linux-gnu/libnss_files.so.2 \
+                                         /usr/lib/$(ARCH)-linux-gnu/libnss_files.so.2 \
+                                         /lib64/libnss_files.so.2 /lib/libnss_files.so.2))
+_libs_src       = $(shell ldd $(FINITBIN) | grep -Eo '/[^ ]+') $(_libs_nss)
 libs            = $(foreach path,$(_libs_src),$(abspath $(DEST))$(path))
 
 all: $(libs) $(DEST)/bin/$(BBBIN)

@@ -199,6 +199,14 @@ typedef struct svc {
 	int		       num_supgroups;
 	char	       capabilities[MAX_CMD_LEN];
 
+	/* Directories set up for the service, block format only, the
+	 * name is resolved under a fixed base, e.g. /run/NAME */
+	char	       runtime_dir[MAX_ARG_LEN];
+	char	       state_dir[MAX_ARG_LEN];
+	char	       cache_dir[MAX_ARG_LEN];
+	char	       logs_dir[MAX_ARG_LEN];
+	char	       config_dir[MAX_ARG_LEN];
+
 	/* Command, arguments and service description */
 	char	       cmd[MAX_CMD_LEN];
 	char	       args[MAX_NUM_SVC_ARGS][MAX_CMD_LEN];

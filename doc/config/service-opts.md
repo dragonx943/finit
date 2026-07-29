@@ -96,6 +96,45 @@ following settings are available:
   * `oncrash = "script"` -- similarly, but instead of rebooting, call
     the `exec-stop-post` script with exit code `crashed`, see below
 
+Service directories
+-------------------
+
+Five settings ask Finit to create a directory for the service before it
+starts, owned by its `user` and `group`, mode 0755.  The value is a
+directory name, resolved under a fixed base -- absolute paths and `..`
+are refused:
+
+| Setting | Base | Environment variable |
+|---|---|---|
+| `runtime-dir` | `/run` | `RUNTIME_DIRECTORY` |
+| `state-dir` | `/var/lib` | `STATE_DIRECTORY` |
+| `cache-dir` | `/var/cache` | `CACHE_DIRECTORY` |
+| `logs-dir` | `/var/log` | `LOGS_DIRECTORY` |
+| `config-dir` | `/etc` | `CONFIGURATION_DIRECTORY` |
+
+Each resolved path is exported to the process environment under the
+listed name, the same names systemd uses for `RuntimeDirectory=` and
+friends.
+
+The runtime directory is removed again when the service stops, after
+any `exec-stop-post` script has run; `/run` is a tmpfs so it would not
+survive a reboot anyway.  The other four persist.  A completed `run` or
+`task` counts as stopped, unless `remain-after-exit` keeps it alive
+until stopped for real.
+
+This is what lets a service drop privileges and still create, and
+later touch, its own PID file:
+
+    service ntpd {
+        user        = "ntp"
+        group       = "ntp"
+        runtime-dir = "ntpd"
+        pidfile     = "/run/ntpd/ntpd.pid"
+        command     = "/usr/sbin/ntpd -n -p /run/ntpd/ntpd.pid"
+    }
+
+These settings exist only in the block format.
+
 Stopping and reloading
 ----------------------
 
