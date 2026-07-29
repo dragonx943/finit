@@ -114,13 +114,26 @@ are refused:
 
 Each resolved path is exported to the process environment under the
 listed name, the same names systemd uses for `RuntimeDirectory=` and
-friends.
+friends.  As in systemd, `config-dir` is the odd one out: it is created
+but never chowned.
+
+Each takes a matching `-mode`, e.g. `runtime-dir-mode = 0700`, default
+0755.  Modes are octal, with the leading zero.
+
+The mode of the named directory is locked down again on every start.
+Its contents are left alone as long as the owner is right; if the owner
+has drifted, everything under it is chowned back.
 
 The runtime directory is removed again when the service stops, after
 any `exec-stop-post` script has run; `/run` is a tmpfs so it would not
 survive a reboot anyway.  The other four persist.  A completed `run` or
 `task` counts as stopped, unless `remain-after-exit` keeps it alive
-until stopped for real.
+until stopped for real.  `runtime-dir-preserve` adjusts this, same
+values as systemd's `RuntimeDirectoryPreserve=`:
+
+  * `"no"` -- removed when the service stops, the default
+  * `"restart"` -- kept across restarts, removed on a real stop
+  * `"yes"` -- never removed
 
 This is what lets a service drop privileges and still create, and
 later touch, its own PID file:

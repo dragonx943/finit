@@ -577,11 +577,11 @@ static void set_uid(uid_t uid, svc_t *svc)
  * any post: script has run.  See issue #492.
  */
 const struct svcdir svcdirs[NUM_SVCDIRS] = {
-	{ "runtime-dir", "/run",       "RUNTIME_DIRECTORY",       offsetof(svc_t, runtime_dir) },
-	{ "state-dir",   "/var/lib",   "STATE_DIRECTORY",         offsetof(svc_t, state_dir)   },
-	{ "cache-dir",   "/var/cache", "CACHE_DIRECTORY",         offsetof(svc_t, cache_dir)   },
-	{ "logs-dir",    "/var/log",   "LOGS_DIRECTORY",          offsetof(svc_t, logs_dir)    },
-	{ "config-dir",  "/etc",       "CONFIGURATION_DIRECTORY", offsetof(svc_t, config_dir)  },
+	{ "runtime-dir", "/run",       "RUNTIME_DIRECTORY",       offsetof(svc_t, runtime_dir), 1 },
+	{ "state-dir",   "/var/lib",   "STATE_DIRECTORY",         offsetof(svc_t, state_dir),   1 },
+	{ "cache-dir",   "/var/cache", "CACHE_DIRECTORY",         offsetof(svc_t, cache_dir),   1 },
+	{ "logs-dir",    "/var/log",   "LOGS_DIRECTORY",          offsetof(svc_t, logs_dir),    1 },
+	{ "config-dir",  "/etc",       "CONFIGURATION_DIRECTORY", offsetof(svc_t, config_dir),  0 },
 };
 
 static char *svcdir_path(svc_t *svc, const struct svcdir *sd, char *path, size_t len)
@@ -618,12 +618,15 @@ int service_set_dir(svc_t *svc, const struct svcdir *sd, const char *name)
 	return 0;
 }
 
-static void service_mkdirs(svc_t *svc)
+static void service_mkdirs(svc_t *svc, uid_t uid, gid_t gid)
 {
 	char path[256];
 	size_t i;
 
 	for (i = 0; i < NELEMS(svcdirs); i++) {
+		uid_t u = svcdirs[i].chown ? uid : (uid_t)-1;
+		gid_t g = svcdirs[i].chown ? gid : 0;
+		struct stat st;
 		char *ptr;
 
 		ptr = svcdir_path(svc, &svcdirs[i], path, sizeof(path));
@@ -631,16 +634,21 @@ static void service_mkdirs(svc_t *svc)
 			continue;
 
 		/*
-		 * Script forks land here too, so an existing directory
-		 * is left alone -- mode and ownership are asserted at
-		 * creation only, a daemon may have tightened them.
+		 * Same rules as systemd: the named directory has its mode
+		 * locked down again on every start, but its contents are
+		 * only touched when the owner has drifted, then everything
+		 * under it is chowned back.  Script forks land here too,
+		 * so this must be idempotent.
 		 */
-		if (fisdir(ptr))
+		if (stat(ptr, &st) == 0) {
+			chmod(ptr, svc->dir_mode[i]);
+			if (u != (uid_t)-1 && (st.st_uid != u || st.st_gid != g))
+				chownr(ptr, u, g);
 			continue;
+		}
 
 		/* only the named directory is chowned, like systemd */
-		mkpath(ptr, 0755);
-		if (mksubsys(ptr, 0755, svc->username, svc->group))
+		if (mksubsysd(ptr, svc->dir_mode[i], u, g))
 			logit(LOG_WARNING, "%s: failed creating %s", svc_ident(svc, NULL, 0), ptr);
 	}
 }
@@ -661,8 +669,17 @@ static void service_rmdirs(svc_t *svc)
 	char path[256];
 
 	/* only the runtime directory, /run is tmpfs, the rest persist */
-	if (svcdir_path(svc, &svcdirs[0], path, sizeof(path)))
-		rmrf(path);
+	if (!svcdir_path(svc, &svcdirs[0], path, sizeof(path)))
+		return;
+
+	if (svc->dir_preserve == SVC_DIR_PRESERVE_YES)
+		return;
+
+	/* still qualified to run means this is a restart, not a stop */
+	if (svc->dir_preserve == SVC_DIR_PRESERVE_RESTART && svc_enabled(svc))
+		return;
+
+	rmrf(path);
 }
 
 static pid_t service_fork(svc_t *svc)
@@ -686,8 +703,6 @@ static pid_t service_fork(svc_t *svc)
 
 	if (pid == 0) {
 		char *home = NULL;
-
-		service_mkdirs(svc);
 #ifdef ENABLE_STATIC
 		int uid = 0; /* XXX: Fix better warning that dropprivs is disabled. */
 		int gid = 0;
@@ -707,6 +722,7 @@ static pid_t service_fork(svc_t *svc)
 			return -1;
 		}
 #endif
+		service_mkdirs(svc, uid, gid);
 		if (svc_is_tty(svc))
 			setprocnm("getty");
 
@@ -2372,8 +2388,11 @@ svc_t *service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		memset(svc->capabilities, 0, sizeof(svc->capabilities));
 
 	/* block format only, set by conf.c after registration */
-	for (int i = 0; i < NUM_SVCDIRS; i++)
+	for (int i = 0; i < NUM_SVCDIRS; i++) {
 		memset((char *)svc + svcdirs[i].off, 0, MAX_ARG_LEN);
+		svc->dir_mode[i] = 0755;
+	}
+	svc->dir_preserve = SVC_DIR_PRESERVE_NO;
 
 	if (!svc_is_tty(svc) && ctty) {
 		char *dev = ctty;

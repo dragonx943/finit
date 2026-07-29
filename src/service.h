@@ -38,8 +38,8 @@ struct svcdir {
 	const char *base;
 	const char *env;
 	size_t      off;	/* offsetof() in svc_t */
+	int         chown;	/* all but config-dir, like systemd */
 };
-#define NUM_SVCDIRS 5
 extern const struct svcdir svcdirs[NUM_SVCDIRS];
 
 int	  service_set_dir	 (svc_t *svc, const struct svcdir *sd, const char *name);

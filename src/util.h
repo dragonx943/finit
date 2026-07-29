@@ -72,6 +72,8 @@ int   getcuser     (char *buf, size_t len);
 int   getcgroup    (char *buf, size_t len);
 
 int   mksubsys     (const char *dir, mode_t mode, char *user, char *group);
+int   mksubsysd    (const char *dir, mode_t mode, uid_t uid, gid_t gid);
+int   chownr       (const char *path, uid_t uid, gid_t gid);
 int   rmcontents   (const char *path);
 int   rmrf         (const char *path);
 

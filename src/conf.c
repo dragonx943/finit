@@ -274,6 +274,12 @@ static cfg_opt_t svc_opts[] = {
 	CFG_STR     ("cache-dir",    NULL, CFGF_NODEFAULT),
 	CFG_STR     ("logs-dir",     NULL, CFGF_NODEFAULT),
 	CFG_STR     ("config-dir",   NULL, CFGF_NODEFAULT),
+	CFG_INT     ("runtime-dir-mode",     0, CFGF_NODEFAULT),
+	CFG_INT     ("state-dir-mode",       0, CFGF_NODEFAULT),
+	CFG_INT     ("cache-dir-mode",       0, CFGF_NODEFAULT),
+	CFG_INT     ("logs-dir-mode",        0, CFGF_NODEFAULT),
+	CFG_INT     ("config-dir-mode",      0, CFGF_NODEFAULT),
+	CFG_STR     ("runtime-dir-preserve", NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("conflicts",    NULL, CFGF_NODEFAULT),
 	CFG_STR     ("if",           NULL, CFGF_NODEFAULT),
 	CFG_STR     ("tty",          NULL, CFGF_NODEFAULT),
@@ -1301,20 +1307,45 @@ static int if_translate(const char *str, char *buf, size_t len, char *file, cons
  */
 static void dirs_translate(cfg_t *sec, svc_t *svc, char *file)
 {
+	const char *str;
 	int i;
 
 	for (i = 0; i < NUM_SVCDIRS; i++) {
-		const char *str;
+		char key[32];
+		long num;
 
 		str = sec_getstr(sec, svcdirs[i].key, NULL);
-		if (!str || !str[0])
-			continue;
+		if (str && str[0]) {
+			if (service_set_dir(svc, &svcdirs[i], str))
+				logit(LOG_ERR, "%s: %s: %s '%s' %s, ignoring",
+				      file, cfg_title(sec), svcdirs[i].key, str,
+				      errno == ENAMETOOLONG ? "is too long"
+				      : "must be relative, no '..'");
+		}
 
-		if (service_set_dir(svc, &svcdirs[i], str))
-			logit(LOG_ERR, "%s: %s: %s '%s' %s, ignoring",
-			      file, cfg_title(sec), svcdirs[i].key, str,
-			      errno == ENAMETOOLONG ? "is too long"
-			      : "must be relative, no '..'");
+		snprintf(key, sizeof(key), "%s-mode", svcdirs[i].key);
+		if (sec_getint(sec, key, NULL, &num)) {
+			if (num & ~07777L)
+				logit(LOG_ERR, "%s: %s: %s %04lo is not a valid"
+				      " mode, ignoring.  Modes are octal,"
+				      " with the leading zero", file,
+				      cfg_title(sec), key, num);
+			else
+				svc->dir_mode[i] = (mode_t)num;
+		}
+	}
+
+	if ((str = sec_getstr(sec, "runtime-dir-preserve", NULL))) {
+		if (!strcmp(str, "no") || !strcmp(str, "false"))
+			svc->dir_preserve = SVC_DIR_PRESERVE_NO;
+		else if (!strcmp(str, "restart"))
+			svc->dir_preserve = SVC_DIR_PRESERVE_RESTART;
+		else if (!strcmp(str, "yes") || !strcmp(str, "true"))
+			svc->dir_preserve = SVC_DIR_PRESERVE_YES;
+		else
+			logit(LOG_ERR, "%s: %s: runtime-dir-preserve '%s' is not"
+			      " no, restart, or yes, using no", file,
+			      cfg_title(sec), str);
 	}
 }
 

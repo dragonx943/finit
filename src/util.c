@@ -325,6 +325,33 @@ static int rmrf_cb(const char *fpath, const struct stat *sb, int tflag, struct F
 	return 0;
 }
 
+/* nftw() cannot pass user data, see also tmpfiles.c do_clean() */
+static uid_t chownr_uid;
+static gid_t chownr_gid;
+
+static int chownr_cb(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftw)
+{
+	(void)tflag;
+	(void)ftw;
+
+	if (sb->st_uid == chownr_uid && sb->st_gid == chownr_gid)
+		return 0;
+
+	if (lchown(fpath, chownr_uid, chownr_gid))
+		warn("Failed chown(%s, %d, %d)", fpath, (int)chownr_uid, (int)chownr_gid);
+
+	return 0;
+}
+
+/* chown -R */
+int chownr(const char *path, uid_t uid, gid_t gid)
+{
+	chownr_uid = uid;
+	chownr_gid = gid;
+
+	return nftw(path, chownr_cb, 20, FTW_PHYS);
+}
+
 /* empty a directory but keep it, silently ignores a missing path */
 int rmcontents(const char *path)
 {
@@ -347,32 +374,41 @@ int rmrf(const char *path)
 	return 0;
 }
 
-int mksubsys(const char *dir, mode_t mode, char *user, char *group)
+/*
+ * Like mksubsys() but with the ids already resolved, uid -1 skips the
+ * chown.  Parents are created 0755, only the leaf gets @mode.
+ */
+int mksubsysd(const char *dir, mode_t mode, uid_t uid, gid_t gid)
 {
 	mode_t omask;
-	int uid, gid;
-	int rc = 0;
+	int rc;
 
 	omask = umask(0);
 
-	rc = makedir(dir, mode);
-	if (rc && errno == EEXIST)
+	rc = mkpath(dir, 0755);
+	if (!rc) {
 		rc = chmod(dir, mode);
-
-	uid = getuser(user, NULL);
-	if (uid >= 0) {
-		gid = getgroup(group);
-		if (gid < 0)
-			gid = 0;
-
-		if (chown(dir, uid, gid))
-			err(1, "Failed chown(%s, %d, %d)", dir, uid, gid);
-	} else
-		warnx("Cannot find user %s, %s is owned by root", user, dir);
+		if (!rc && uid != (uid_t)-1 && chown(dir, uid, gid))
+			err(1, "Failed chown(%s, %d, %d)", dir, (int)uid, (int)gid);
+	}
 
 	umask(omask);
 
 	return rc;
+}
+
+int mksubsys(const char *dir, mode_t mode, char *user, char *group)
+{
+	int uid, gid;
+
+	uid = getuser(user, NULL);
+	gid = getgroup(group);
+	if (gid < 0)
+		gid = 0;
+	if (uid < 0)
+		warnx("Cannot find user %s, %s is owned by root", user, dir);
+
+	return mksubsysd(dir, mode, uid < 0 ? (uid_t)-1 : (uid_t)uid, (gid_t)gid);
 }
 
 /*
