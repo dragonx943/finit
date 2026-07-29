@@ -130,33 +130,6 @@ static int parse_mm(char *arg, int *major, int *minor)
 	return 0;
 }
 
-static int do_delete(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftw)
-{
-	(void)sb;
-	(void)tflag;
-
-	if (ftw->level == 0)
-		return 1;
-
-	if (remove(fpath) && errno != EBUSY)
-		warn("Failed removing %s", fpath);
-
-	return 0;
-
-}
-
-static int rmrf(const char *path)
-{
-	if (!fisdir(path))
-		return 0;
-
-	nftw(path, do_delete, 20, FTW_DEPTH | FTW_PHYS);
-	if (remove(path) && errno != ENOENT)
-		warn("Failed removing path %s", path);
-
-	return 0;
-}
-
 static void mkparent(char *path, mode_t mode)
 {
 	mkpath(dirname(strdupa(path)), mode);
@@ -465,9 +438,7 @@ static void tmpfiles(char *line)
 		case 'd':
 			break;
 		case 'D':
-			if (fisdir(path)) {
-				nftw(path, do_delete, 20, FTW_DEPTH | FTW_PHYS);
-			}
+			rmcontents(path);
 			break;
 		case 'e':
 		case 'f':

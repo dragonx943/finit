@@ -72,6 +72,8 @@ int   getcuser     (char *buf, size_t len);
 int   getcgroup    (char *buf, size_t len);
 
 int   mksubsys     (const char *dir, mode_t mode, char *user, char *group);
+int   rmcontents   (const char *path);
+int   rmrf         (const char *path);
 
 char *fslurp       (size_t *lenp, const char *fmt, ...)    __attribute__ ((format (printf, 2, 3)));
 char *vfslurp      (size_t *lenp, const char *fmt, va_list ap);

@@ -45,6 +45,7 @@
 # include <sys/ioctl.h>
 #endif
 #include <sys/resource.h>
+#include <ftw.h>		/* rmrf() */
 #include <sys/sysinfo.h>	/* sysinfo() */
 #include <sys/vfs.h>		/* statfs */
 #include <linux/magic.h>
@@ -310,6 +311,42 @@ int getcgroup(char *buf, size_t len)
 	return 0;
 }
 
+static int rmrf_cb(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftw)
+{
+	(void)sb;
+	(void)tflag;
+
+	if (ftw->level == 0)
+		return 0;
+
+	if (remove(fpath) && errno != EBUSY)
+		warn("Failed removing %s", fpath);
+
+	return 0;
+}
+
+/* empty a directory but keep it, silently ignores a missing path */
+int rmcontents(const char *path)
+{
+	if (!fisdir(path))
+		return 0;
+
+	return nftw(path, rmrf_cb, 20, FTW_DEPTH | FTW_PHYS);
+}
+
+/* rm -rf, silently ignores a missing path */
+int rmrf(const char *path)
+{
+	if (!fisdir(path))
+		return 0;
+
+	nftw(path, rmrf_cb, 20, FTW_DEPTH | FTW_PHYS);
+	if (remove(path) && errno != ENOENT)
+		warn("Failed removing path %s", path);
+
+	return 0;
+}
+
 int mksubsys(const char *dir, mode_t mode, char *user, char *group)
 {
 	mode_t omask;
@@ -318,18 +355,20 @@ int mksubsys(const char *dir, mode_t mode, char *user, char *group)
 
 	omask = umask(0);
 
+	rc = makedir(dir, mode);
+	if (rc && errno == EEXIST)
+		rc = chmod(dir, mode);
+
 	uid = getuser(user, NULL);
 	if (uid >= 0) {
 		gid = getgroup(group);
 		if (gid < 0)
 			gid = 0;
 
-		rc = makedir(dir, mode);
-		if (rc && errno == EEXIST)
-			rc = chmod(dir, mode);
 		if (chown(dir, uid, gid))
 			err(1, "Failed chown(%s, %d, %d)", dir, uid, gid);
-	}
+	} else
+		warnx("Cannot find user %s, %s is owned by root", user, dir);
 
 	umask(omask);
 
