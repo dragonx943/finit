@@ -1230,6 +1230,65 @@ static void addlog(char *line, size_t len, cfg_t *sec, char *file)
  * Translate service/task/run/sysv section to the canonical legacy
  * one-liner and register through the same path as legacy files.
  */
+/*
+ * if = "udevd" asks whether a service by that name is known, answered
+ * when the .conf is read, while if = "usr/foo" tests a condition,
+ * answered at runtime.  The namespace separator tells the two apart,
+ * so the legacy angle brackets are not needed.  A statement must be
+ * all of one kind; the two are not checked at the same time, so they
+ * cannot be combined.
+ */
+static int if_translate(const char *str, char *buf, size_t len, char *file, const char *ident)
+{
+	char tmp[MAX_IDENT_LEN];
+	char *op, *save;
+	int cond = -1;
+
+	if (strpbrk(str, "<>")) {
+		logit(LOG_ERR, "%s: %s: if: angle brackets are not used in this"
+		      " format, got '%s', skipping", file, ident, str);
+		return -1;
+	}
+
+	if (strlcpy(tmp, str, sizeof(tmp)) >= sizeof(tmp)) {
+		logit(LOG_ERR, "%s: %s: if: '%s' is too long, skipping",
+		      file, ident, str);
+		return -1;
+	}
+
+	for (op = strtok_r(tmp, ",", &save); op; op = strtok_r(NULL, ",", &save)) {
+		int is_cond;
+
+		if (op[0] == '!')
+			op++;
+		if (!op[0])
+			continue;
+
+		is_cond = strchr(op, '/') != NULL;
+		if (cond == -1)
+			cond = is_cond;
+		else if (cond != is_cond) {
+			logit(LOG_ERR, "%s: %s: if: cannot mix a service name with a"
+			      " condition in '%s', a statement must be all of one"
+			      " kind, skipping", file, ident, str);
+			return -1;
+		}
+	}
+
+	if (cond == -1) {
+		logit(LOG_ERR, "%s: %s: if: no condition or service name in '%s',"
+		      " skipping", file, ident, str);
+		return -1;
+	}
+
+	if (cond)
+		snprintf(buf, len, "<%s>", str);
+	else
+		strlcpy(buf, str, len);
+
+	return 0;
+}
+
 static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *file)
 {
 	struct rlimit local_rlimit[RLIMIT_NLIMITS];
@@ -1401,8 +1460,13 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	if (sec_getlist(sec, "conflicts", NULL, buf, sizeof(buf)))
 		addtok(line, sizeof(line), "conflict:%s", buf);
 
-	if ((str = sec_getstr(sec, "if", NULL)))
-		addopt(line, sizeof(line), "if:", str);
+	if ((str = sec_getstr(sec, "if", NULL))) {
+		char ifbuf[MAX_IDENT_LEN + 2];
+
+		if (if_translate(str, ifbuf, sizeof(ifbuf), file, cfg_title(sec)))
+			return;
+		addopt(line, sizeof(line), "if:", ifbuf);
+	}
 	if ((str = sec_getstr(sec, "tty", NULL)))
 		addtok(line, sizeof(line), "tty:%s", str);
 

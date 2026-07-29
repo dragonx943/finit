@@ -296,7 +296,7 @@ Consider this (simplified) example from the Infix operating system:
 
     run failure {
         runlevel   = "S"
-        if         = "<usr/fail-startup>"
+        if         = "usr/fail-startup"
         conditions = { "pid/sysrepo" }
         command    = "confd --load failure-config"
     }
@@ -312,9 +312,23 @@ check whether a run/task/service is qualified to even be considered.
 `if` has a negation of its own, `!`, which is unrelated to anything in
 the `conditions` list.
 
-What `if` compares against depends on the angle brackets: `if = "udevd"`
-asks whether a service by that name is known, decided when the .conf is
-read, while `if = "<usr/foo>"` tests a condition at runtime.
+What `if` compares against depends on the value.  A namespace
+separator makes it a condition, anything else is a service name:
+
+| `if` | Asks |
+|---|---|
+| `"udevd"` | is a service by this name known? |
+| `"usr/foo"` | was this condition set? |
+
+Both are questions about whether the block belongs in the running
+configuration at all, usually answered from what bootstrap established.
+A statement is all of one kind or the other, so the block is rejected
+if you mix them.
+
+> [!NOTE]
+> `if` qualifies, it does not track.  A condition asserted or cleared
+> later does not start or stop the service by itself -- that is what
+> the `conditions` list is for.
 
 Conditional execution can also be negated, so provided the file loaded
 did the opposite, i.e., set a condition on success, the previous block
@@ -322,7 +336,7 @@ can be written as:
 
     run failure {
         runlevel   = "S"
-        if         = "<!usr/startup-ok>"
+        if         = "!usr/startup-ok"
         conditions = { "pid/sysrepo" }
         command    = "confd ..."
     }
