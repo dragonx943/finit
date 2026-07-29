@@ -40,21 +40,21 @@ see the [TTY and Consoles](config/tty.md) section.
 **Runlevels**
 
 Support for SysV init-style [runlevels][5] is available, in the same
-minimal style as everything else in Finit.  The `[2345]` syntax can be
-applied to service, task, run, and TTY stanzas.
+minimal style as everything else in Finit.  The `runlevel` setting
+applies to service, task, run, and tty blocks alike.
 
 Reserved runlevels are 0 and 6, halt and reboot, respectively just like
 SysV init.  Runlevel 1 can be configured freely, but is recommended to
 be kept as the system single-user runlevel since Finit will not start
-networking here.  The configured `runlevel NUM` from `/etc/finit.conf`
+networking here.  The configured `runlevel` from `/etc/finit.conf`
 is what Finit changes to after bootstrap, unless 'single' (or 'S') is
 given on the kernel cmdline, in which case runlevel 1 is started.
 
-All services in runlevel S) are started first, followed by the desired
+All services in runlevel S are started first, followed by the desired
 run-time runlevel.  Run tasks in runlevel S can be started in sequence
-by using `run [S] cmd`.  Changing runlevels at runtime is done like any
-other init, e.g. <kbd>init 4</kbd>, but also using the more advanced
-[`initctl`](initctl.md) tool.
+by using a `run` block with `runlevel = "S"`.  Changing runlevels at
+runtime is done like any other init, e.g. <kbd>init 4</kbd>, but also
+using the more advanced [`initctl`](initctl.md) tool.
 
 
 **Conditions**
@@ -222,7 +222,7 @@ The name of each sub-group is taken from the username.
 
 A fourth group also exists, the `root` group.  It is also _reserved_ and
 primarily intended for RT tasks.  If you have RT tasks they need to be
-declared as such in their service stanza like this:
+declared as such in their service block like this:
 
     service foo {
         cgroup root {}

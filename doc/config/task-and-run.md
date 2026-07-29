@@ -3,7 +3,8 @@ run (sequence)
 
 **Syntax:** `run NAME { command = "/path/to/cmd ARGS" }`
 
-> `<COND>` is described in the [Services](services.md) section.
+> Conditions, runlevels, and the other settings a `run` block takes are
+> described in [Service Options](service-opts.md).
 
 One-shot command to run in sequence when entering a runlevel, with
 optional arguments and description.  `run` commands are guaranteed to be
@@ -33,7 +34,8 @@ task (parallel)
 
 **Syntax:** `task NAME { command = "/path/to/cmd ARGS" }`
 
-> `<COND>` is described in the [Services](services.md) section.
+> A `task` block takes the same settings as `run`, see
+> [Service Options](service-opts.md).
 
 One-shot like 'run', but starts in parallel with the next command.
   
@@ -93,7 +95,7 @@ The firewall rules are created once.  The `exec-stop-post` script runs when
 entering runlevel 0 (halt) or 6 (reboot), or on explicit stop.
 
 > [!NOTE]
-> The `remain-after-exit` option is not supported for bootstrap-only
+> The `remain-after-exit` setting is not supported for bootstrap-only
 > tasks (tasks with only runlevel S).  Bootstrap tasks are deleted
 > immediately after completion, and their `exec-stop-post` scripts never
 > run.  A warning is logged if `remain-after-exit` is used on such tasks.

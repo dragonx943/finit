@@ -32,7 +32,7 @@ notification is available, and the native PID file mode of operation is,
 as of Finit v4.6 optional, by default it is still enabled, but this can
 be changed in `finit.conf`:
 
-    readiness none
+    readiness = "none"
 
 This will be made the default in Finit 5.0.  In this mode of operation,
 every service needs to explicitly declare their readiness notification,
@@ -43,10 +43,10 @@ like this:
     service bar       { notify = "s6"       command = "bar"       }
     service qux       { notify = "none"     command = "qux"       }
 
-The `notify = "none"` setting is for completeness in systems which run in
-`readiness pid` mode (default).  Services declared with `notify = "none"`
-will transition to ready as soon as Finit has started them, e.g.,
-`service/qux/ready`.
+The `notify = "none"` setting is for completeness in systems which run
+in `readiness = "pid"` mode (default).  Services declared with
+`notify = "none"` will transition to ready as soon as Finit has started
+them, e.g., `service/qux/ready`.
 
 To synchronize two services the following condition can be used:
 
@@ -60,7 +60,7 @@ To synchronize two services the following condition can be used:
         command    = "stress-ng --cpu 8"
     }
 
-For details on the syntax and options, see below.
+For the full list of conditions, see [Finit Conditions](../conditions.md).
 
 > [!NOTE]
 > On `initctl reload` conditions are set in "flux", while figuring out
@@ -73,7 +73,7 @@ For details on the syntax and options, see below.
 > However, the s6 notify mode does not support this because in s6 you
 > are expected to close your notify descriptor after having written
 > `\n`.  This means s6 style daemons currently must be stop-started.
-> (Declare the service with `<!>` in its condition statement.)
+> (Declare the service with `reload-signal = "none"`.)
 >
 > For default, PID file style readiness notification, daemons are
 > expected to either create their PID files, or touch it using

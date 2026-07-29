@@ -132,7 +132,7 @@ tty tty3 {
 #tty console { runlevel = "12345"  device = "@console"  noclear = true  nologin = true }
 ```
 
-The `service` stanza, as well as `task`, `run` and others are described in
+The `service` block, as well as `task`, `run` and others are described in
 full in the [Services Syntax](config/services.md) section.
 
 Here's a quick overview of some of the most common components needed to start

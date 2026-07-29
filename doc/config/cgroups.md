@@ -1,19 +1,17 @@
-Finit provides three different cgroup directives for controlling resource allocation:
+Finit has two `cgroup` blocks for controlling resource allocation:
 
- 1. **Top-level cgroup definition**: `cgroup NAME settings`
-    - Defines a top-level cgroup (e.g., `init`, `system`, `user`) with default settings
-    - Space-separated syntax
-    - Example: `cgroup system cpu.weight:9700`
+ 1. **Top-level definition**, at file scope: declares a group such as
+    `init`, `system`, or `user`, and its default settings.
 
- 2. **Global cgroup selector**: `cgroup.NAME[,options]` (standalone directive)
-    - Sets the default cgroup for subsequent services in a `.conf` file
-    - Dot-separated with optional comma-separated options
-    - Example: `cgroup.maint` or `cgroup.system,delegate`
+        cgroup system { cpu.weight = 9700 }
 
- 3. **Per-service cgroup option**: `cgroup.NAME[,options]` or `cgroup:options`
-    - Overrides the cgroup for a specific service
-    - Part of the service directive line
-    - Example: `service [...] cgroup.maint,mem.max:1G /path/to/cmd`
+ 2. **Joining a group**, inside a service block: names the group this
+    service runs in, and may override settings for itself alone.
+
+        service foo {
+            cgroup maint { memory.max = 1G }
+            command = "/path/to/cmd"
+        }
 
 > [!NOTE]
 > Linux cgroups and details surrounding values are not explained in the
@@ -84,11 +82,11 @@ apply to that service alone:
 > joins a group says so itself, so the group cannot depend on what came
 > earlier in the file.
 
-Note the `mem.` exception to the rule: every cgroup setting maps directly to
-cgroup v2 syntax. I.e., `cpu.max` maps to the file `/sys/fs/cgroup/maint/foo/cpu.max`.
-There is no filtering, except for expanding the shorthand `mem.` to `memory.`.
-If the file is not available, either the cgroup controller is not available
-in your Linux kernel, or the name is misspelled.
+Every cgroup setting maps directly to cgroup v2 syntax, so `cpu.max`
+maps to the file `/sys/fs/cgroup/maint/foo/cpu.max`.  There is no
+filtering, the one exception being the shorthand `mem.`, which expands
+to `memory.`.  If the file is not available, either the controller is
+missing from your Linux kernel, or the name is misspelled.
 
 ### Overriding Cgroup Leaf Names
 
@@ -229,7 +227,7 @@ Initially, the service process runs directly in the cgroup root:
 
 Once the container runtime creates child cgroups (e.g., `libpod-*/`), cgroups v2
 enforces the "no internal processes" rule. When Finit detects this (`EBUSY` error),
-it automatically creates an `supervisor/` subdirectory and moves service-related
+it automatically creates a `supervisor/` subdirectory and moves service-related
 processes there:
 
     /sys/fs/cgroup/system/container@web/

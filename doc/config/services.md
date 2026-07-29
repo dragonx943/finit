@@ -7,10 +7,11 @@ Service, or daemon, to be monitored and automatically restarted if it
 exits prematurely.  Finit tries to restart services that die, by default
 10 times before giving up and marking them as *crashed*.  After which
 they have to be manually restarted with `initctl restart NAME`.  The
-limits controlling this are configurable, see the options below.
+limits controlling this are configurable, see
+[Service Options](service-opts.md).
 
 > [!TIP]
-> To allow endless restarts, see the [`respawn` option](service-opts.md)
+> To allow endless restarts, see [`respawn`](service-opts.md#restarting)
   
 For daemons that support it, we recommend appending `--foreground`,
 `--no-background`, `-n`, `-F`, or similar command line argument to
@@ -59,11 +60,11 @@ prevent it from forking to the background:
 `runlevel` denotes the runlevels `ospfd` is allowed to run in, it is
 optional and defaults to level 2-4 if omitted.
 
-`conditions` lists what must be asserted before starting `ospfd`.  In this example Finit
-waits for another service, `zebra`, to have created its PID file in
-`/var/run/quagga/zebra.pid` before starting `ospfd`.  Finit watches
-*all* files in `/var/run`, for each file named `*.pid`, or `*/pid`,
-Finit opens it and find the matching `NAME:ID` using the PID.
+`conditions` lists what must be asserted before starting `ospfd`.  In
+this example Finit waits for another service, `zebra`, to have created
+its PID file in `/var/run/quagga/zebra.pid`.  Finit watches *all* files
+in `/var/run`, for each file named `*.pid`, or `*/pid`, Finit opens it
+and finds the matching `NAME:ID` using the PID.
 
 A condition may be prefixed with `~` to propagate a reload of the
 upstream service to this one, rather than merely pausing and resuming
@@ -216,8 +217,8 @@ web server would be started and supervised.
 Conditional Loading
 -------------------
 
-Finit support conditional loading of stanzas.  The following example is
-take from the `system/hotplug.conf` file in the Finit distribution.
+Finit supports conditional loading of blocks.  The following example is
+taken from the `system/10-hotplug.conf` file in the Finit distribution.
 Here we only show a simplified subset.
 
 Starting with the leading `-` on `command`.
@@ -235,7 +236,7 @@ Starting with the leading `-` on `command`.
 When loading the .conf file Finit looks for
 `/lib/systemd/systemd-udevd`, and if that is not found it logs a
 warning.  The leading `-` says a missing binary is expected here, so
-the stanza is skipped quietly and the second block can be evaluated,
+the block is skipped quietly and the second one can be evaluated,
 which also provides a service named `udevd`.
 
     run udevadm:1 {
@@ -245,7 +246,7 @@ which also provides a service named `udevd`.
         command    = "-udevadm settle -t 0"
     }
 
-This line is only loaded if we know of a service named `udevd`.  Again,
+This block is only loaded if we know of a service named `udevd`.  Again,
 we do not warn if `udevadm` is not found, execution will also stop here
 until the PID condition is asserted, i.e., Finit detecting udevd has
 started.
@@ -260,8 +261,8 @@ started.
 If `udevd` is not available, we try to run `mdev`, but if that is not
 found, again we do not warn.
 
-Conditional loading statements can also be negated, so the previous
-stanza can also be written as:
+Conditional loading can also be negated, so the previous block can be
+written as:
 
     run mdev {
         description = "Populating device tree"
@@ -270,18 +271,19 @@ stanza can also be written as:
         command     = "-mdev -s"
     }
 
-The reason for using `conflict` in this example is that a conflict can be
-resolved.  Stanzas naming a conflict are rechecked at runtime.
+The reason for using `conflicts` in this example is that a conflict can
+be resolved.  Blocks naming a conflict are rechecked at runtime.
 
 
 Conditional Execution
 ---------------------
 
-Similar to conditional loading of stanzas there is conditional runtime
+Similar to conditional loading of blocks there is conditional runtime
 execution.  This can be confusing at first, since Finit already has a
 condition subsystem, but this is more akin to the qualification to a
-runlevel.  E.g., a `task [123]` is qualified to run only in runlevel 1,
-2, and 3.  It is not considered for other runlevels.
+runlevel.  E.g., a task with `runlevel = "123"` is qualified to run
+only in runlevel 1, 2, and 3.  It is not considered for other
+runlevels.
 
 Conditional execution qualify a run/task/service based on a condition.
 Consider this (simplified) example from the Infix operating system:
@@ -299,10 +301,10 @@ Consider this (simplified) example from the Infix operating system:
         command    = "confd --load failure-config"
     }
 
-The two run statements reside in the same .conf file so Finit runs them
-in true sequence.  If loading the file `startup-config` fails confd sets
-the condition `usr/fail-startup`, thus allowing the next run statement
-to load `failure-config`.
+The two run blocks reside in the same .conf file so Finit runs them in
+true sequence.  If loading the file `startup-config` fails confd sets
+the condition `usr/fail-startup`, thus allowing the next one to load
+`failure-config`.
 
 Notice the critical difference between the `conditions` list and `if`.
 The former is a condition for starting; the latter is a condition to
@@ -310,9 +312,13 @@ check whether a run/task/service is qualified to even be considered.
 `if` has a negation of its own, `!`, which is unrelated to anything in
 the `conditions` list.
 
-Conditional execution statements can also be negated, so provided the
-file loaded did the opposite, i.e., set a condition on success, the
-previous stanza can also be written as:
+What `if` compares against depends on the angle brackets: `if = "udevd"`
+asks whether a service by that name is known, decided when the .conf is
+read, while `if = "<usr/foo>"` tests a condition at runtime.
+
+Conditional execution can also be negated, so provided the file loaded
+did the opposite, i.e., set a condition on success, the previous block
+can be written as:
 
     run failure {
         runlevel   = "S"

@@ -38,8 +38,8 @@ Example:
     }
 
 When bootstrap has completed, Finit moves to runlevel 2.  This can be
-changed in `/etc/finit.conf` using the `runlevel N` directive, or by a
-script running in runlevel S that calls, e.g., `initctl runlevel 9`.
+changed in `/etc/finit.conf` with `runlevel = N`, or by a script running
+in runlevel S that calls, e.g., `initctl runlevel 9`.
 The latter is useful if startup scripts detect problems outside of
 Finit's control, e.g., critical services/devices missing or hardware
 problems.
@@ -52,7 +52,7 @@ complete before proceeding to 2.
 Finit first stops everything that is not allowed to run in 2, and then
 brings up networking.  Networking is expected to be available in all
 runlevels except: S, 1 (single user level), 6, and 0.  Networking is
-enabled either by the `network script` directive, or if you have an
+enabled either by `network = "script"`, or if you have an
 `/etc/network/interfaces` file, Finit calls `ifup -a` -- at the very
 least the loopback interface is brought up.
 
@@ -88,7 +88,7 @@ Networking
 
 Script or program to bring up networking, with optional arguments.
 
-Deprecated.  We recommend using dedicated task/run stanzas per runlevel,
+Deprecated.  We recommend using dedicated task/run blocks per runlevel,
 or `/etc/network/interfaces` if you have a system with `ifupdown`, like
 Debian, Ubuntu, Linux Mint, or an embedded BusyBox system.
 
@@ -156,7 +156,7 @@ albeit deprecated.
 
 `rlimit` can be set globally, in `/etc/finit.conf`, or locally per
 each `/etc/finit.d/*.conf` read.  I.e., a set of task/run/service
-stanzas can share the same rlimits if they are in the same .conf.
+blocks can share the same rlimits if they are in the same .conf.
 
 Miscellaneous Settings
 ----------------------

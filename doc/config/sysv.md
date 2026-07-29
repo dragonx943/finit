@@ -11,34 +11,36 @@ SysV Init Scripts
 
 **Syntax:** `sysv NAME { command = "/path/to/init-script" }`
 
-> `<COND>` is described in the [Services](services.md) section.
+> [!NOTE]
+> Conditions, runlevels, and the other settings a `sysv` block takes
+> are described in [Service Options](service-opts.md).
 
-Similar to `task` is the `sysv` stanza, which can be used to call SysV
-style scripts.  The primary intention for this command is to be able to
-reuse much of existing setup and init scripts in Linux distributions.
+A `sysv` block is a supervised daemon, like `service`, but started and
+stopped through a SysV style init script instead of a command line.  The
+intention is to reuse existing setup and init scripts from Linux
+distributions.
   
 When entering an allowed runlevel, Finit calls `init-script start`, when
 entering a disallowed runlevel, Finit calls `init-script stop`, and if
-the Finit .conf, where `sysv` stanza is declared, is modified, Finit
+the Finit .conf, where the `sysv` block is declared, is modified, Finit
 calls `init-script restart` on `initctl reload`.  Similar to how
-`service` stanzas work.
+`service` blocks work.
 
 Forking services started with `sysv` scripts can be monitored by Finit
 by declaring the PID file to look for: `pidfile = "/path/to/file.pid"`.
 Finit does not create that file, it watches it for the resulting
-forked-off PID, which is the default; `pidfile-create = true` is what
-asks Finit to write it instead.  This
-syntax also works for forking daemons that do not have a command line
-option to run it in the foreground, more on this below in `service`.
+forked-off PID.  That is the default; `pidfile-create = true` asks Finit
+to write it instead.  The same applies to forking daemons with no way to
+run in the foreground, see [Services](services.md).
 
 > [!TIP]
 > See also [SysV Init Compatibility](#sysv-init-compatibility).
 
-`runparts DIRECTORY`
---------------------
+Run-parts
+---------
 
 For a directory with traditional start/stop scripts that should run, in
-order, at bootstrap, Finit provides the `runparts` directive.  It runs
+order, at bootstrap, Finit provides the `runparts` setting.  It runs
 in runlevel S, at the very end of it (before calling `/etc/rc.local`)
 making it perfect for most scenarios.
 
@@ -89,6 +91,7 @@ it exists, and is executable.  It is called very late in the boot process
 when the system has left runlevel S, stopped all old and started all new
 services in the target runlevel (default 2).
 
+> [!NOTE]
 > In Finit releases before v4.5 this script blocked Finit execution and
 > made it as good as impossible to call `initctl` during that time.
 

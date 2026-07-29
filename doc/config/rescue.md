@@ -47,21 +47,22 @@ system administrator.
 
 The bundled default `rescue.conf` contains nothing more than:
 
-    runlevel 1
+    runlevel = 1
     tty rescue {
         runlevel = "12345"
         rescue   = true
     }
 
-The `tty` has the `rescue` option set, which works similar to the board
-bring-up tty option `notty`.  The major difference being that `sulogin`
+The `tty` block has `rescue` set, which works similar to the board
+bring-up setting `notty`.  The major difference being that `sulogin`
 is started to query for root/admin password.  If `sulogin` is not found,
 `rescue` behaves like `notty` and gives a plain root shell prompt.
 
-If Finit cannot find `/lib/finit/rescue.conf` it defaults to:
+If Finit cannot find `/lib/finit/rescue.conf` it falls back to a
+built-in equivalent, which runs in every runlevel it can:
 
     tty rescue {
-        runlevel = "12345"
+        runlevel = "12345789"
         rescue   = true
     }
 

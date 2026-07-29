@@ -28,8 +28,8 @@ The `device` variant takes two more:
 | `baud` | Baud rate, default 0, i.e., keep kernel default |
 | `term` | `$TERM` value, e.g. `"vt220"` |
 
-> The `tty` stanza inherits runlevel, condition (and other feature)
-> parsing from the `service` stanza.  So TTYs can run in one or many
+> A `tty` block inherits runlevel, condition (and other feature)
+> parsing from the `service` block.  So TTYs can run in one or many
 > runlevels and depend on any condition supported by Finit.  This is
 > useful e.g. to depend on `<pid/elogind>` before starting a TTY.
 
@@ -47,13 +47,13 @@ The second `tty` syntax variant is for using an external getty, like
 agetty or the BusyBox getty.
 
 The third variant is for board bringup and the `rescue` boot mode.  No
-device node is required in this variant, the same output that the kernel
-uses is reused for stdio.  If the `rescue` option is omitted, a shell is
-started (`nologin`, `noclear`, and `nowait` are implied), if the rescue
-option is set the bundled `/libexec/finit/sulogin` is started to present
-a bare-bones root login prompt.  If the root (uid:0, gid:0) user does
-not have a password set, no rescue is possible.  For more information,
-see the [Rescue Mode](rescue.md) section.
+device node is required, the same output the kernel uses is reused for
+stdio.  With `notty` a shell is started (`nologin`, `noclear`, and
+`nowait` are implied); with `rescue` the bundled
+`/libexec/finit/sulogin` presents a bare-bones root login prompt.  If
+the root (uid:0, gid:0) user does not have a password set, no rescue is
+possible.  For more information, see the [Rescue Mode](rescue.md)
+section.
 
 By default, the first two syntax variants *clear* the TTY and *wait* for
 the user to press enter before starting getty.
@@ -71,27 +71,24 @@ the user to press enter before starting getty.
         nowait   = true
     }
 
-The `noclear` option disables clearing the TTY after each session.
+The `noclear` setting disables clearing the TTY after each session.
 Clearing the TTY when a user logs out is usually preferable.
   
-The `nowait` option disables the `press Enter to activate console`
+The `nowait` setting disables the `press Enter to activate console`
 message before actually starting the getty program.  On small and
 embedded systems running multiple unused getty wastes both memory
 and CPU cycles, so `wait` is the preferred default.
 
-The `nologin` option disables getty and `/bin/login`, and gives the
-user a root (login) shell on the given TTY `<DEV>` immediately.
+The `nologin` setting disables getty and `/bin/login`, and gives the
+user a root (login) shell on the given TTY immediately.
 Needless to say, this is a rather insecure option, but can be very
 useful for developer builds, during board bringup, or similar.
 
-Notice the ordering, the `TERM` option to the built-in getty must be
-the last argument.
-
 Embedded systems may want to enable automatic `DEV` by supplying the
-special `@console` device.  This works regardless weather the system
+special `@console` device.  This works regardless whether the system
 uses `ttyS0`, `ttyAMA0`, `ttyMXC0`, or anything else.  Finit figures
-it out by querying sysfs: `/sys/class/tty/console/active`.  The speed
-can be omitted to keep the kernel default.
+it out by querying sysfs: `/sys/class/tty/console/active`.  Leave
+`baud` out to keep the kernel default.
 
 > Most systems get by fine by just using `console`, which will evaluate
 > to `/dev/console`.  If you have to use `@console` to get any output,
@@ -119,7 +116,7 @@ This should of course not be enabled on production systems.  Because it
 may give a user root access without having to log in.  However, for
 board bringup and system debugging it can come in handy.
 
-One can also use the `service` stanza to start a stand-alone shell:
+One can also use a `service` block to start a stand-alone shell:
 
     service shell {
         runlevel = "12345"
@@ -129,23 +126,23 @@ One can also use the `service` stanza to start a stand-alone shell:
 Controlling TTY for Services
 ----------------------------
 
-The `tty:<dev>` option gives a `run`, `task`, or `service` a controlling
+The `tty` setting gives a `run`, `task`, or `service` a controlling
 terminal on the given device.  The device is opened, set as the
 controlling terminal for the session (after `setsid()`), and connected to
 the process's stdin, stdout, and stderr.  A default `TERM` environment
 variable is set based on the device type: `vt102` for serial lines and
 `linux` for virtual terminals.
 
-`<dev>` may be a device node like `/dev/ttyS0`, or the special keyword
-`@console` (see above).  Note that `@console` expands only to the
-first console, not all.
+The value may be a device node like `/dev/ttyS0`, or the special
+keyword `@console` (see above).  Note that `@console` expands only to
+the first console, not all.
 
-When `tty:` is combined with `log:`, stdout and stderr are redirected
-to the log sink instead of the TTY, but stdin remains connected to the
-TTY device.
+When `tty` is combined with a `log` block, stdout and stderr are
+redirected to the log sink instead of the TTY, but stdin remains
+connected to the TTY device.
 
-> The `tty:<dev>` option is for `run`, `task`, and `service` stanzas only.
-> The `tty` directive itself (for getty/login) has its own syntax, see
+> The `tty` setting is for `run`, `task`, and `service` blocks only.
+> A `tty` block (for getty/login) is a different thing entirely, see
 > above.
 
 **Example:**

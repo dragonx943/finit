@@ -17,8 +17,8 @@ To enable ZeroConf for, e.g., `eth0`, use
 The enabled symlink will be set up to `avahi-autoipd@.conf` and every
 instance of `%i` will be replaced with `eth0` before the file is
 parsed, so it works in the block title, in any value, and in the
-command line alike.  Inspect the resulting instantiated template with `initctl show
-avahi-autoipd:eth0` and check the status of a running instance with:
+command line alike.  Inspect the result with `initctl show
+avahi-autoipd:eth0`, and check a running instance with:
 
 ```
 $ initctl status avahi-autoipd:eth0

@@ -7,12 +7,11 @@ mechanism for common synchronization problems.  For example:
 - *"wait for service A to start before starting service B"*, or
 - *"wait for basic network access to be available"*
 
-Conditions are similar in syntax to declaring runlevels per service.
-They are specified within angle brackets `<>` and can be applied to any
-of the `service`, `task`, or `run` stanza.  Multiple conditions may be
-specified separated by comma.  Multiple conditions are logically AND'ed
+A condition is named in the `conditions` list of a `service`, `task`, or
+`run` block.  The list may hold several, and they are logically AND'ed
 during evaluation, i.e. all conditions must be satisfied in order for a
-service to run.
+service to run.  In running text, and in `initctl` output, a condition
+is written inside angle brackets, `<pid/syslogd>`.
 
 One prefix can be used on a condition:
 
@@ -188,15 +187,15 @@ The `devmon` (built-in) plugin monitors `/dev` and `/dev/dir` for device
 nodes being created and removed.  It is active only when a run, task, or
 service has declared a `<dev/foo>` or `<dev/dir/bar>` condition.
 
-The `pidfile` plugin (recursively) watches `/run/` (recursively) for PID
-files created by the monitored services, and sets a corresponding
-condition in the `pid/` namespace.
+The `pidfile` plugin recursively watches `/run/` for PID files created
+by the monitored services, and sets a corresponding condition in the
+`pid/` namespace.
 
 Similarly, the `netlink` plugin provides basic conditions for when an
 interface is brought up/down and when a default route (gateway) is set,
 in the `net/` namespace.
 
-The `sys` and `usr` plugins monitor are passive condition monitors where
+The `sys` and `usr` plugins are passive condition monitors where
 the action is provided by `keventd`, signal handlers, and in the case of
 `usr`, the end-user via the `initctl` tool.
 
@@ -266,8 +265,8 @@ its conditions are cleared and reasserted, ensuring dependent services
 are properly updated.
 
 Daemons that don't create PID files, or fail to touch them on reload,
-can be worked around by using the `pid:/path/to/file.pid` syntax in
-the service stanza for the daemon.  It is far from optimal since any
+can be worked around by setting `pidfile` and `pidfile-create` in the
+service block for the daemon.  It is far from optimal since any
 synchronization of depending services may fail due to the daemon not
 having reinitialized/created their IPC sockets, or similar.
 

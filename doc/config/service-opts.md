@@ -58,7 +58,8 @@ Other run/task/service settings are:
   * `notify` -- see [Service Synchronization](service-sync.md)
   * `if` -- see [Conditional Execution](services.md#conditional-execution)
   * `type = "forking"` -- see description of the [service](services.md) block
-  * a leading `-` on `command` -- see [Conditional Loading](services.md#conditional-loading)
+  * a leading `-` on `command` -- see
+    [Conditional Loading](services.md#conditional-loading)
 
 Restarting
 ----------
@@ -68,13 +69,14 @@ on the configuration and conditions.  Within the confines of that the
 following settings are available:
 
   * `restart-max = NUM` -- number of times Finit tries to restart a
-    crashing service, default: 10, max: 255.  When this limit is
-    reached the service is marked *crashed* and must be restarted
-    manually with `initctl restart NAME`
+    crashing service, default: 10.  When this limit is reached the
+    service is marked *crashed* and must be restarted manually with
+    `initctl restart NAME`
   * `restart-sec = SEC` -- number of seconds before Finit tries to
-    restart a crashing service, default: 2 seconds for the first five
-    retries, then back-off to 5 seconds.  The maximum of this
-    configured value and the above (2 and 5) will be used
+    restart a crashing service.  The default is 2 seconds for the first
+    half of `restart-max` attempts, then a back-off to 5 seconds -- with
+    the default `restart-max` that is the first five retries.  The
+    greater of this configured value and the back-off is used
   * `restart = "always"` -- no upper limit on the number of times Finit
     tries to restart a crashing service
   * `restart = "never"` -- do not restart on failures.  `false` is
@@ -168,7 +170,7 @@ accident:
 When a run/task/sysv/service is removed (disable + reload) it is first
 stopped and then removed from the runlevel.  The `exec-stop-post`
 script always runs when the process has stopped, and `exec-cleanup`
-runs when the stanza has been removed from the runlevel.
+runs when the block has been removed from the runlevel.
 
 > [!IMPORTANT]
 > These script actions are intended for setup, cleanup, and readiness

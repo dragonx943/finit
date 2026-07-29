@@ -70,7 +70,7 @@ For your convenience a set of *optional* plugins are available:
   name of the module to load.  Any line starting with the standard UNIX
   comment character, `#`, or `;`, is skipped.
   
-  Modules are by default loaded in runlevel `S` using the `task` stanza.
+  Modules are by default loaded in runlevel `S` using a `task` block.
   Each module is named `modprobe.foo`, with an optional `:ID`.  The
   runlevel can be changed per file using:
 
