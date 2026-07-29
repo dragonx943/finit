@@ -1875,9 +1875,11 @@ static void parse_cmdline_args(svc_t *svc, char *cmd, char **args)
  * defaults to "" (empty string).
  *
  * Returns:
- * POSIX OK(0) on success, or non-zero errno exit status on failure.
+ * The registered svc, or %NULL with @errno set on failure.  A block
+ * skipped on purpose -- conditional loading, bootstrap over, nowarn --
+ * also returns %NULL, with @errno zero.
  */
-int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
+svc_t *service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 {
 	char *cmd, *desc, *runlevels = NULL, *cond = NULL;
 	char *username = NULL, *log = NULL, *pid = NULL;
@@ -1905,12 +1907,15 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 	if (!cfg) {
 		errx(1, "Invalid input argument");
-		return errno = EINVAL;
+		errno = EINVAL;
+		return NULL;
 	}
 
 	line = strdupa(cfg);
-	if (!line)
-		return 1;
+	if (!line) {
+		errno = ENOMEM;
+		return NULL;
+	}
 
 	desc = strstr(line, "-- ");
 	if (desc) {
@@ -1935,7 +1940,8 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 	if (!cmd) {
 	incomplete:
 		errx(1, "Incomplete service '%s', cannot register", cfg);
-		return errno = ENOENT;
+		errno = ENOENT;
+		return NULL;
 	}
 
 	while (cmd) {
@@ -2035,14 +2041,17 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		strlcat(ident, id, sizeof(ident));
 	}
 
-	if (ifstmt && !svc_ifthen(1, ident, ifstmt, nowarn))
-		return 0;
+	if (ifstmt && !svc_ifthen(1, ident, ifstmt, nowarn)) {
+		errno = 0;
+		return NULL;
+	}
 
 	levels = conf_parse_runlevels(runlevels);
 	if (runlevel != INIT_LEVEL && !ISOTHER(levels, INIT_LEVEL)) {
 		dbg("Skipping %s%s%s, bootstrap is completed.",
 		    name, id[0] ? ":" : "", id[0] ? id : "");
-		return 0;
+		errno = 0;
+		return NULL;
 	}
 
 	if (type == SVC_TYPE_TTY) {
@@ -2050,7 +2059,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		char *ptr;
 
 		if (tty_parse_args(&tty, cmd, &args))
-			return errno;
+			return NULL;
 
 		/* NOTE: this may result in dev == NULL! */
 		if (tty_isatcon(tty.dev))
@@ -2069,7 +2078,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 		line = alloca(len);
 		if (!line)
-			return errno;
+			return NULL;
 
 		snprintf(line, len, "%s", tty.cmd ? tty.cmd : "tty");
 		for (i = 0; i < tty.num; i++) {
@@ -2079,7 +2088,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 		cmd = strtok_r(line, " \t", &args);
 		if (!cmd)
-			return errno;
+			return NULL;
 
 		/* tty's always respawn, never incr. restart_cnt */
 		respawn = 1;
@@ -2104,11 +2113,13 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		svc = svc_find(name, id);
 
 	if (!whichp(cmd)) {
-		if (nowarn)
-			return 0;
+		if (nowarn) {
+			errno = 0;
+			return NULL;
+		}
 
 		warn("%s: skipping %s", file ? file : "static", cmd);
-		return errno;
+		return NULL;
 	}
 
 	if (!svc) {
@@ -2116,7 +2127,8 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		svc = svc_new(cmd, name, id, type);
 		if (!svc) {
 			errx(1, "Out of memory, cannot register service %s", cmd);
-			return errno = ENOMEM;
+			errno = ENOMEM;
+			return NULL;
 		}
 
 		if (manual)
@@ -2375,7 +2387,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		}
 	}
 
-	return 0;
+	return svc;
 }
 
 /*
