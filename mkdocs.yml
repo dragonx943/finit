@@ -1,6 +1,6 @@
 site_name: User's Guide
 site_description: Fast Init for Linux Systems
-site_url: http://finit-project.github.io
+site_url: https://finit-project.github.io
 repo_url: https://github.com/finit-project/finit
 repo_name: Finit Project
 copyright: Copyright &copy; 2008-2026 Joachim Wiberg
@@ -145,6 +145,8 @@ plugins:
 extra:
   generator: false
   homepage: https://finit-project.github.io/
+  version:
+    provider: mike
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/finit-project/finit

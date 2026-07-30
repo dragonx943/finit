@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - master
+      - 4.x
     paths:
       - 'doc/**'
       - 'README.md'
       - 'mkdocs.yml'
+      - 'configure.ac'
       - '.github/workflows/docs.yml'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -15,6 +17,7 @@ on:
       - 'doc/**'
       - 'README.md'
       - 'mkdocs.yml'
+      - 'configure.ac'
       - '.github/workflows/docs.yml'
 
 permissions:
@@ -23,11 +26,20 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Needed for git-revision-date-localized plugin
+
+      - name: Determine docs version
+        id: version
+        run: |
+          version=$(sed -n 's/^AC_INIT(\[Finit\], *\[\([0-9]*\)\..*/\1.x/p' configure.ac)
+          test -n "$version"
+          echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -52,9 +64,11 @@ jobs:
           path: site/
 
   deploy:
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
 
     steps:
       - name: Download site artifact
@@ -79,7 +93,56 @@ jobs:
 
       - name: Sync site to pages repo
         run: |
-          rsync -a --delete --exclude .git site/ pages/
+          rsync -a --delete site/ "pages/$VERSION/"
+
+      - name: Update version index and redirects
+        run: |
+          cd pages/
+
+          # The root holds only version directories and the files
+          # generated below, drop anything else (pre-versioned site)
+          find . -maxdepth 1 ! -name . ! -name .git ! -name CNAME \
+               ! -name '[0-9]*.x' -exec rm -rf {} +
+
+          latest=$(ls -d [0-9]*.x | sort -rV | head -1)
+
+          sep=
+          printf '[' > versions.json
+          for v in $(ls -d [0-9]*.x | sort -rV); do
+              printf '%s{"version": "%s", "title": "%s", "aliases": []}' \
+                     "$sep" "$v" "$v" >> versions.json
+              sep=', '
+          done
+          printf ']\n' >> versions.json
+
+          cat > index.html <<EOF
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=$latest/">
+              <link rel="canonical" href="https://finit-project.github.io/$latest/">
+            </head>
+          </html>
+          EOF
+
+          cat > 404.html <<EOF
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <title>Finit &mdash; page not found</title>
+              <script>
+                var path = window.location.pathname;
+                if (!/^\/[0-9]+\.x(\/|$)/.test(path))
+                  window.location.replace("/$latest" + path);
+              </script>
+            </head>
+            <body>
+              <p>Page not found.  Try the <a href="/$latest/">latest User Guide</a>.</p>
+            </body>
+          </html>
+          EOF
 
       - name: Commit and push
         run: |
