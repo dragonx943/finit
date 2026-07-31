@@ -213,6 +213,11 @@ multiple web servers, add `:ID` to the block title, like this:
 Without the `:ID` the latter will overwrite the former and only the old
 web server would be started and supervised.
 
+> [!NOTE]
+> The line-based format also accepts a bare ID, `service :80 ...`,
+> deriving the name from the command.  There is no block equivalent:
+> the title carries both name and ID.
+
 
 Conditional Loading
 -------------------
