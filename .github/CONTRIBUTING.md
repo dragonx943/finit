@@ -52,7 +52,7 @@ how `git commit -s` is used to automatically add a `Signed-off-by`:
     More detailed explanatory text, if necessary.  Wrap it to about 72
     characters or so.  In some contexts, the first line is treated as
     the subject of an email and the rest of the text as the body.  The
-    blank line separating the ummary from the body is critical (unless
+    blank line separating the summary from the body is critical (unless
     you omit the body entirely); tools like rebase can get confused if
     you run the two together.
     
@@ -75,5 +75,5 @@ Bill & Ted; [be excellent to each other][conduct].
 
 
 [KNF]:      https://en.wikipedia.org/wiki/Kernel_Normal_Form
-[gitbook]:  https://git-scm.com/book/ch5-2.html
+[gitbook]:  https://git-scm.com/book/en/v2/Distributed-Git-Contributing-to-a-Project#_commit_guidelines
 [conduct]:  CODE-OF-CONDUCT.md
