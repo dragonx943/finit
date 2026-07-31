@@ -20,7 +20,6 @@ Please take care to ensure you follow the project coding style and the
 commit message format.  If you follow these recommendations you help
 the maintainer(s) and make it easier for them to include your code.
 
-
 Coding Style
 ------------
 
@@ -31,8 +30,7 @@ First of all, lines are allowed to be longer than 72 characters these
 days.  In fact, there exist no enforced maximum, but keeping it around
 100 chars is OK.
 
-The coding style itself is strictly Linux [KNF][].
-
+The coding style itself is strictly [Linux coding style][KNF].
 
 Commit Messages
 ---------------
@@ -41,31 +39,38 @@ Commit messages exist to track *why* a change was made.  Try to be as
 clear and concise as possible in your commit messages, and always, be
 proud of your work and set up a proper GIT identity for your commits:
 
-    git config --global user.name "Jane Doe"
-    git config --global user.email jane.doe@example.com
+```bash
+$ git config --global user.name "Jane Doe"
+$ git config --global user.email jane.doe@example.com
+```
 
 Example commit message from the [Pro Git][gitbook] online book, notice
 how `git commit -s` is used to automatically add a `Signed-off-by`:
 
-    Brief, but clear and concise summary of changes
-    
-    More detailed explanatory text, if necessary.  Wrap it to about 72
-    characters or so.  In some contexts, the first line is treated as
-    the subject of an email and the rest of the text as the body.  The
-    blank line separating the summary from the body is critical (unless
-    you omit the body entirely); tools like rebase can get confused if
-    you run the two together.
-    
-    Further paragraphs come after blank lines.
-    
-     - Bullet points are okay, too
-    
-     - Typically a hyphen or asterisk is used for the bullet, preceded
-       by a single space, with blank lines in between, but conventions
-       vary here
-    
-    Signed-off-by: Jane Doe <jane.doe@example.com>
+```
+Brief, but clear and concise summary of changes
 
+More detailed explanatory text, if necessary.  Remember, a future
+reader has the diff and can see what it does, the commit message in
+itself should usually talk about the *why* of a change and/or any
+technical limitations and future work.
+
+Wrap the text to about 72 characters or so.  In some contexts, the
+first line is treated as the subject of an email and the rest of the
+text as the body.  The blank line separating the summary from the body
+is critical (unless you omit the body entirely); tools like rebase can
+get confused if you run the two together.
+
+Further paragraphs come after blank lines.
+
+ - Bullet points are okay, too
+
+ - Typically a hyphen or asterisk is used for the bullet, preceded
+   by a single space, with blank lines in between, but conventions
+   vary here
+
+Signed-off-by: Jane Doe <jane.doe@example.com>
+```
 
 Code of Conduct
 ---------------
@@ -73,7 +78,6 @@ Code of Conduct
 It is expected of everyone engaging in the project to, in the words of
 Bill & Ted; [be excellent to each other][conduct].
 
-
-[KNF]:      https://en.wikipedia.org/wiki/Kernel_Normal_Form
+[KNF]:      https://www.kernel.org/doc/html/v5.8/process/coding-style.html
 [gitbook]:  https://git-scm.com/book/en/v2/Distributed-Git-Contributing-to-a-Project#_commit_guidelines
 [conduct]:  CODE-OF-CONDUCT.md
