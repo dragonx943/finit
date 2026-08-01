@@ -43,15 +43,17 @@ _libs_nss      := $(firstword $(wildcard /lib/$(ARCH)-linux-gnu/libnss_files.so.
 # one test can check Finit against dbus-daemon instead of only against
 # libink's own client.  Absent is fine, dbus-broker.sh skips.
 dbus_bins      := $(foreach b,dbus-daemon dbus-send,$(firstword $(wildcard /usr/bin/$(b) /bin/$(b))))
-# Given several binaries ldd prefixes each with a 'path:' header, and
-# that trailing colon would land in a make target.  Excluding it here
-# is enough, no need for one ldd per binary.
-_libs_dbus     := $(if $(dbus_bins),$(shell ldd $(dbus_bins) | grep -Eo '/[^ :]+'))
 
-# The binaries stage exactly like the libraries: same host path, same
-# path under DEST, copied by the rule below.
-_libs_src      := $(shell ldd $(FINITBIN) | grep -Eo '/[^ ]+') $(_libs_nss) \
-                  $(_libs_dbus) $(dbus_bins)
+# Bundled helpers like keventd link more libraries than finit itself,
+# and so does dbus-daemon.  One ldd per binary: given several at once
+# ldd prefixes each with a 'path:' header, and that trailing colon
+# would land in a make target.
+_bins          := $(FINITBIN) $(dbus_bins) \
+                  $(shell find $(abspath $(DEST)) -path '*libexec/finit*' -type f -perm -u+x 2>/dev/null)
+# The dbus binaries stage exactly like the libraries: same host path,
+# same path under DEST, copied by the rule below.
+_libs_src      := $(foreach bin,$(_bins),$(shell ldd $(bin) 2>/dev/null | grep -Eo '/[^ ]+')) \
+                  $(_libs_nss) $(dbus_bins)
 libs           := $(foreach path,$(sort $(_libs_src)),$(abspath $(DEST))$(path))
 
 all: $(libs) $(DEST)/bin/$(BBBIN)
