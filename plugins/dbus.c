@@ -100,7 +100,7 @@ static void setup(void *arg)
 {
 	char *group = DBUS_DAEMONGROUP;
 	char *user = DBUS_DAEMONUSER;
-	char line[256];
+	char pid[300];
 	char *pidfn;
 	mode_t prev;
 	char *cmd;
@@ -151,15 +151,19 @@ static void setup(void *arg)
 	 * Register service with Finit
 	 * Note: dbus drops privs after starting up.
 	 */
+	pid[0] = 0;
 	if (pidfn) {
-		snprintf(line, sizeof(line), "[S123456789] cgroup.system notify:none name:dbus pid:!%s %s %s -- %s",
-			 pidfn, cmd, DBUS_ARGS, DBUS_DESC);
+		snprintf(pid, sizeof(pid), "\tpidfile     = \"%s\"\n", pidfn);
 		free(pidfn);
-	} else
-		snprintf(line, sizeof(line), "[S123456789] cgroup.system notify:none name:dbus %s %s -- %s",
-			 cmd, DBUS_ARGS, DBUS_DESC);
-
-	conf_save_service(SVC_TYPE_SERVICE, line, "dbus.conf");
+	}
+	conf_save_service(SVC_TYPE_SERVICE, "dbus", "dbus.conf",
+			  "\tdescription = \"" DBUS_DESC "\"\n"
+			  "\trunlevel    = \"S123456789\"\n"
+			  "\tnotify      = \"none\"\n"
+			  "\tcgroup system {}\n"
+			  "%s"
+			  "\tcommand     = \"%s " DBUS_ARGS "\"\n",
+			  pid, cmd);
 	free(cmd);
 }
 
