@@ -126,7 +126,7 @@ hook into the boot process or respond to various I/O.
 For more information, see the [Plugins](plugins.md) section.
 
 
-**Automatic Reload**
+**Automatic Reload**{ #automatic-reload }
 
 By default, Finit monitors `/etc/finit.d/` and `/etc/finit.d/enabled/`
 registering any changes to `.conf` files.  To activate a change the user

@@ -12,6 +12,7 @@ extra_css:
 exclude_docs: |
   TODO.md
   ChangeLog.md
+  README.md
 
 nav:
   - Getting Started:

@@ -54,7 +54,7 @@ Other run/task/service settings are:
   * `cgroup NAME {}` -- see the [Cgroups](cgroups.md) section
   * `envfile` -- see the [Service Environment](service-env.md) section
   * `log {}` -- see [Redirecting Output](logging.md#redirecting-output)
-  * `tty` -- see [Controlling TTY](tty.md#controlling-tty)
+  * `tty` -- see [Controlling TTY](tty.md#controlling-tty-for-services)
   * `notify` -- see [Service Synchronization](service-sync.md)
   * `if` -- see [Conditional Execution](services.md#conditional-execution)
   * `type = "forking"` -- see description of the [service](services.md) block
