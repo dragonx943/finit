@@ -1453,10 +1453,6 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 
 	/*
 	 * The daemon owns its pidfile unless told otherwise, so the
-	 * legacy ! is the default here and pidfile-create drops it.
-	 */
-	/*
-	 * The daemon owns its pidfile unless told otherwise, so the
 	 * legacy ! is the default here and pidfile-create drops it.  A
 	 * daemon-owned default path needs no token, that is what the
 	 * pidfile plugin discovers on its own.
