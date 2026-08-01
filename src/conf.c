@@ -665,6 +665,25 @@ done:
 }
 
 /*
+ * Escape backslash and double quote so a runtime string can sit in a
+ * double-quoted .conf value.  Truncates to fit @buf, always returns a
+ * terminated string.
+ */
+char *conf_escape(const char *str, char *buf, size_t len)
+{
+	size_t i = 0;
+
+	while (*str && i + 2 < len) {
+		if (*str == '"' || *str == '\\')
+			buf[i++] = '\\';
+		buf[i++] = *str++;
+	}
+	buf[i] = 0;
+
+	return buf;
+}
+
+/*
  * Called by plugins and similar that dynamically generate system
  * services.  @body holds the block contents, one indented line per
  * setting.
@@ -2565,6 +2584,7 @@ int conf_init(uev_ctx_t *ctx)
 	 */
 	if (runparts && fisdir(runparts) && !rescue) {
 		char args[10] = { 0 };
+		char dir[256];
 
 		if (debug)
 			strlcat(args, "-d ", sizeof(args));
@@ -2573,6 +2593,7 @@ int conf_init(uev_ctx_t *ctx)
 		if (runparts_sysv)
 			strlcat(args, "-s ", sizeof(args));
 
+		conf_escape(runparts, dir, sizeof(dir));
 		conf_save_service(SVC_TYPE_TASK, "runparts", "runparts.conf",
 				  "\tdescription = \"Calling runparts %s in the background\"\n"
 				  "\trunlevel    = \"S\"\n"
@@ -2580,7 +2601,7 @@ int conf_init(uev_ctx_t *ctx)
 				  "\tnotify      = \"none\"\n"
 				  "\tlog { file = \"/dev/console\" }\n"
 				  "\tcommand     = \"%s %s%s\"\n",
-				  runparts, _PATH_RUNPARTS, args, runparts);
+				  dir, _PATH_RUNPARTS, args, dir);
 	}
 
 	return 0;

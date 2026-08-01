@@ -100,6 +100,7 @@ static void setup(void *arg)
 {
 	char *group = DBUS_DAEMONGROUP;
 	char *user = DBUS_DAEMONUSER;
+	char esccmd[256];
 	char pid[300];
 	char *pidfn;
 	mode_t prev;
@@ -153,7 +154,10 @@ static void setup(void *arg)
 	 */
 	pid[0] = 0;
 	if (pidfn) {
-		snprintf(pid, sizeof(pid), "\tpidfile     = \"%s\"\n", pidfn);
+		char esc[280];
+
+		snprintf(pid, sizeof(pid), "\tpidfile     = \"%s\"\n",
+			 conf_escape(pidfn, esc, sizeof(esc)));
 		free(pidfn);
 	}
 	conf_save_service(SVC_TYPE_SERVICE, "dbus", "dbus.conf",
@@ -163,7 +167,7 @@ static void setup(void *arg)
 			  "\tcgroup system {}\n"
 			  "%s"
 			  "\tcommand     = \"%s " DBUS_ARGS "\"\n",
-			  pid, cmd);
+			  pid, conf_escape(cmd, esccmd, sizeof(esccmd)));
 	free(cmd);
 }
 

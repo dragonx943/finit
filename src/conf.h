@@ -71,6 +71,7 @@ int   conf_monitor         (void);
 
 void  conf_saverc          (void);
 void  conf_save_exec_order (svc_t *svc, char *cmdline, int result);
+char *conf_escape          (const char *str, char *buf, size_t len);
 void  conf_save_service    (int type, const char *name, char *file, const char *fmt, ...)
                            __attribute__ ((format (printf, 4, 5)));
 void  conf_parse_cmdline   (int argc, char *argv[]);
