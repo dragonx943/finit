@@ -21,6 +21,7 @@ nav:
     - Building: build.md
   - Configuration:
     - Overview: config/index.md
+    - Migration Guide: config/migration.md
     - Files & Layout: config/files.md
     - Conditions: conditions.md
     - Runlevels: config/runlevels.md

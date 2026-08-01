@@ -92,7 +92,8 @@ service [S123456789] env:-/etc/default/sysklogd syslogd -F $SYSLOGD_ARGS -- Syst
 
 That format still works and is not going away.  It is frozen at the
 Finit 4.x feature set, so new settings appear only in the block format,
-and the documentation is written in blocks throughout.
+and the documentation is written in blocks throughout.  To convert a
+file, see the [Syntax Migration Guide](migration.md).
 
 There is no new file extension and no marker line.  Every file is still
 `*.conf`, and Finit decides which format a file is in by reading it: if
