@@ -71,6 +71,7 @@ int     print_result    (int fail);
 void    print_exit      (void);
 
 void    set_hostname    (char **hostname);
+void    kmod_load       (char *mod);
 void    networking      (int updown);
 int     in_container    (void);
 void    setprocnm       (const char *name);
@@ -111,6 +112,19 @@ static inline int dprint(int fd, const char *s, size_t len)
 	}
 
 	return rc;
+}
+
+static inline int istrue(char *arg, int defval)
+{
+	if (!arg)
+		goto fallback;
+
+	if (string_compare(arg, "true") || string_compare(arg, "on") || string_compare(arg, "1"))
+		return 1;
+	if (string_compare(arg, "false") || string_compare(arg, "off") || string_compare(arg, "0"))
+		return 0;
+fallback:
+	return defval;
 }
 
 static inline char *fgetval(const char *line, const char *key, char *sep)

@@ -70,12 +70,12 @@ unique group, where files within each group are sorted alphabetically.
     /etc/finit.d/enabled/1-aaa.conf
     /etc/finit.d/enabled/1-abc.conf
 
-The resulting combined configuration is read line by line, each `run`,
+The resulting combined configuration is read in order, each `run`,
 `task`, and `service` added to an ordered list that ensures they are
 started in the same order.  This is important because of the blocking
-properties of the `run` statement.  For an example on the relation of
-`service` and `run` statements, and dependency handling between them,
-see [Conditional Loading](services.md#conditional-loading), below.
+properties of `run`.  For an example on the relation of `service` and
+`run`, and dependency handling between them, see
+[Conditional Loading](services.md#conditional-loading), below.
 
 > [!NOTE]
 > The names `finit.conf` and `finit.d/` are only defaults.  They can be
@@ -84,7 +84,7 @@ see [Conditional Loading](services.md#conditional-loading), below.
 >
 > They can also be overridden from the [kernel command line](../cmdline.md)
 > using: `-- finit.config=/etc/bar.conf` and in that file use the
-> top-level configuration directive `rcsd /path/to/finit.d`.
+> top-level setting `rcsd = "/path/to/finit.d"`.
 
 Filesystem Layout
 -----------------
@@ -180,7 +180,7 @@ document [Finit Services](../service.md).
 Alternate finit.d/
 ------------------
 
-**Syntax:** `rcsd /path/to/finit.d`
+**Syntax:** `rcsd = "/path/to/finit.d"`
 
 The Finit rcS.d directory is set at compile time with:
 
@@ -194,7 +194,7 @@ configurations, starting with the kernel command line option:
 This file in turn can use the `rcsd` directive to tell Finit to use
 another set of .conf files, e.g.:
 
-    rcsd /etc/factory.d
+    rcsd = "/etc/factory.d"
 
 > [!NOTE]
 > This directive is only available from the top-level bootstrap .conf
@@ -203,6 +203,6 @@ another set of .conf files, e.g.:
 Including Finit Configs
 ------------------------
 
-**Syntax:** `include <CONF>`
+**Syntax:** `include("CONF")`
 
 Include another configuration file.  Absolute path required.

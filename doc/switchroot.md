@@ -51,27 +51,52 @@ Configuration file `/etc/finit.conf` in the initramfs:
 # /etc/finit.conf in initramfs
 
 # Mount the real root filesystem
-run [S] name:mount-root /bin/mount /dev/sda1 /mnt/root -- Mounting root filesystem
+run mount-root {
+    description = "Mounting root filesystem"
+    runlevel    = "S"
+    command     = "/bin/mount /dev/sda1 /mnt/root"
+}
 
 # Switch to real root after mount completes
-run [S] name:switch-root /sbin/initctl switch-root /mnt/root -- Switching to real root
+run switch-root {
+    description = "Switching to real root"
+    runlevel    = "S"
+    command     = "/sbin/initctl switch-root /mnt/root"
+}
 ```
 
 For more complex setups (LUKS, LVM, etc.):
 
 ```
 # Unlock LUKS volume
-# The tty:@console stanza is required so cryptsetup can prompt for a passphrase
-run [S] name:cryptsetup tty:@console /sbin/cryptsetup open /dev/sda2 cryptroot -- Unlocking encrypted root
+# The tty setting is required so cryptsetup can prompt for a passphrase
+run cryptsetup {
+    description = "Unlocking encrypted root"
+    runlevel    = "S"
+    tty         = "@console"
+    command     = "/sbin/cryptsetup open /dev/sda2 cryptroot"
+}
 
 # Activate LVM
-run [S] name:lvm /sbin/lvm vgchange -ay -- Activating LVM volumes
+run lvm {
+    description = "Activating LVM volumes"
+    runlevel    = "S"
+    command     = "/sbin/lvm vgchange -ay"
+}
 
 # Mount root
-run [S] name:mount-root /bin/mount /dev/vg0/root /mnt/root -- Mounting root
+run mount-root {
+    description = "Mounting root"
+    runlevel    = "S"
+    command     = "/bin/mount /dev/vg0/root /mnt/root"
+}
 
 # Switch root
-run [S] name:switch-root /sbin/initctl switch-root /mnt/root -- Switching to real root
+run switch-root {
+    description = "Switching to real root"
+    runlevel    = "S"
+    command     = "/sbin/initctl switch-root /mnt/root"
+}
 ```
 
 
@@ -85,15 +110,34 @@ difficult in runlevel S, you can perform the switch-root in runlevel 1:
 # /etc/finit.conf in initramfs
 
 # Start mdevd for device handling
-service [S] name:mdevd notify:s6 /sbin/mdevd -D %n -- Device event daemon
-run [S] name:coldplug <service/mdevd/ready> /sbin/mdevd-coldplug -- Coldplug devices
+service mdevd {
+    description = "Device event daemon"
+    runlevel    = "S"
+    notify      = "s6"
+    command     = "/sbin/mdevd -D %n"
+}
+run coldplug {
+    description = "Coldplug devices"
+    runlevel    = "S"
+    conditions  = { "service/mdevd/ready" }
+    command     = "/sbin/mdevd-coldplug"
+}
 
 # Mount the real root filesystem (after devices are ready)
-run [S] name:mount-root <run/coldplug/success> /bin/mount /dev/sda1 /mnt/root -- Mounting root
+run mount-root {
+    description = "Mounting root"
+    runlevel    = "S"
+    conditions  = { "run/coldplug/success" }
+    command     = "/bin/mount /dev/sda1 /mnt/root"
+}
 
 # Transition to runlevel 1 after all S tasks complete
 # The switch-root runs cleanly in runlevel 1
-run [1] name:switch-root /sbin/initctl switch-root /mnt/root -- Switching to real root
+run switch-root {
+    description = "Switching to real root"
+    runlevel    = "1"
+    command     = "/sbin/initctl switch-root /mnt/root"
+}
 ```
 
 This approach separates the initramfs setup (runlevel S) from the

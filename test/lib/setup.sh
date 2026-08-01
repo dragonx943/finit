@@ -26,6 +26,11 @@ assert_file_contains()
 	assert "File $1 contains the string $2" "$(texec grep "$2" "$1")"
 }
 
+assert_file_exists()
+{
+	assert "File $1 exists" "$(texec ls "$1")"
+}
+
 assert_num_children()
 {
 	assert "$1 services are running" "$(texec pgrep -P 1 "$2" | wc -l)" -eq "$1"
@@ -255,8 +260,12 @@ wdstart()
 
 wdkill()
 {
+    [ -n "${wdpid:-}" ] || return 0
+
     say "Stopping test watchdog, pid $wdpid"
-    kill -KILL $wdpid
+    # Reap the sleep first, killing its subshell orphans it to PID 1.
+    pkill -KILL -P "$wdpid" 2>/dev/null || true
+    kill -KILL "$wdpid" 2>/dev/null || true
 }
 
 teardown()
@@ -304,6 +313,18 @@ trap teardown EXIT
 
 SYSROOT="${SYSROOT:-$(pwd)/${TEST_DIR}/sysroot}"
 export SYSROOT
+
+# 'make check' refreshes the sysroot through the setup-chroot rule, but
+# running a test script by hand does not, and then the test silently
+# exercises whatever finit was installed last.  Compare and refuse.
+top_builddir="${top_builddir:-$TEST_DIR/..}"
+sysroot_finit="$SYSROOT/sbin/finit"
+built_finit="$top_builddir/src/finit"
+[ -x "$top_builddir/src/.libs/finit" ] && built_finit="$top_builddir/src/.libs/finit"
+
+if [ -x "$built_finit" ] && [ -e "$sysroot_finit" ] && ! cmp -s "$built_finit" "$sysroot_finit"; then
+	fail "Stale $sysroot_finit, run 'make -C test setup-chroot' or use 'make check'"
+fi
 
 TEST_TIMEOUT=300
 

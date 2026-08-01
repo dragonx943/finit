@@ -13,20 +13,37 @@ more of a policy for the user to define.  Normally only runlevels 1-6
 are used, and even more commonly, only the default runlevel is used.
 
 To specify an allowed set of runlevels for a `service`, `run` command,
-`task`, or `tty`, add `[NNN]` to your `/etc/finit.conf`, like this:
+`task`, or `tty`, set `runlevel` in your `/etc/finit.conf`, like this:
 
 ```
-service [S12345] syslogd -n -x             -- System log daemon
-run     [S]      /etc/init.d/acpid start   -- Starting ACPI Daemon
-task    [S]      /etc/init.d/kbd start     -- Preparing console
-service [S12345] <pid/syslogd> klogd -n -x -- Kernel log daemon
+service syslogd {
+    description = "System log daemon"
+    runlevel    = "S12345"
+    command     = "syslogd -n -x"
+}
+run acpid {
+    description = "Starting ACPI Daemon"
+    runlevel    = "S"
+    command     = "/etc/init.d/acpid start"
+}
+task kbd {
+    description = "Preparing console"
+    runlevel    = "S"
+    command     = "/etc/init.d/kbd start"
+}
+service klogd {
+    description = "Kernel log daemon"
+    runlevel    = "S12345"
+    conditions  = { "pid/syslogd" }
+    command     = "klogd -n -x"
+}
 
-tty     [12345]  /dev/tty1
-tty     [2]      /dev/tty2
-tty     [2]      /dev/tty3
-tty     [2]      /dev/tty4
-tty     [2]      /dev/tty5
-tty     [2]      /dev/tty6
+tty tty1 { runlevel = "12345"  device = "/dev/tty1" }
+tty tty2 { runlevel = "2"      device = "/dev/tty2" }
+tty tty3 { runlevel = "2"      device = "/dev/tty3" }
+tty tty4 { runlevel = "2"      device = "/dev/tty4" }
+tty tty5 { runlevel = "2"      device = "/dev/tty5" }
+tty tty6 { runlevel = "2"      device = "/dev/tty6" }
 ```
 
 In this example syslogd is first started, in parallel, and then acpid is
@@ -46,8 +63,14 @@ are also removed when they have completed, `initctl show` will not list
 them.
 
 ```
-task [S] echo "foo" | cat >/tmp/bar
-run  [S] echo "$HOME" >/tmp/secret
+task foo {
+    runlevel = "S"
+    command  = "echo \"foo\" | cat >/tmp/bar"
+}
+run secret {
+    runlevel = "S"
+    command  = "echo \"$HOME\" >/tmp/secret"
+}
 ```
 
 Switching between runlevels can be done by calling init with a single

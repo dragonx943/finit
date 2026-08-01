@@ -34,6 +34,7 @@
 #include "cgutil.h"
 #include "initctl.h"
 #include "log.h"
+#include "util.h"
 
 #define CDIM   plain ? "" : "\e[2m"
 #define CRST   plain ? "" : "\e[0m"
@@ -54,42 +55,18 @@ int cgroup_avail(void)
 	return fismnt(FINIT_CGPATH);
 }
 
-static size_t flen(FILE *fp)
-{
-	size_t total = 0, sz;
-	char buf[512];
-
-	while ((sz = fread(buf, 1, sizeof(buf), fp)) > 0)
-		total += sz;
-	rewind(fp);
-
-	return total;
-}
-
 char *pid_cmdline(int pid)
 {
 	size_t i, len;
 	char *buf;
-	FILE *fp;
 
-	fp = fopenf("r", "/proc/%d/cmdline", pid);
-	if (!fp)
+	buf = fslurp(&len, "/proc/%d/cmdline", pid);
+	if (!buf)
 		return strdup("");	/* regular process */
 
-	len = flen(fp);
 	if (len == 0) {
-	fail:
-		fclose(fp);
-		return NULL;		/* kernel thread */
-	}
-
-	buf = calloc(len + 1, 1);
-	if (!buf)
-		goto fail;
-
-	if (fread(buf, 1, len, fp) < len) {
 		free(buf);
-		goto fail;
+		return NULL;		/* kernel thread */
 	}
 
 	/* replace all NUL chars with space */
@@ -98,46 +75,30 @@ char *pid_cmdline(int pid)
 			buf[i] = ' ';
 	}
 
-	fclose(fp);
 	return buf;
 }
 
 char *pid_cgroup(int pid)
 {
-	char *buf, *ptr = NULL;
-	size_t len;
-	FILE *fp;
+	char *buf, *ptr;
 
-	fp = fopenf("r", "/proc/%d/cgroup", pid);
-	if (!fp)
+	buf = fslurp(NULL, "/proc/%d/cgroup", pid);
+	if (!buf)
 		return NULL;
 
-	len = flen(fp);
-	if (len == 0) {
-		fclose(fp);
-		return NULL;
-	}
-	len++;
+	ptr = strchr(buf, '\n');	/* first line only */
+	if (ptr)
+		*ptr = 0;
+	chomp(buf);
 
-	buf = calloc(1, len);
-	if (!buf) {
-		fclose(fp);
-		return NULL;
-	}
-
-	if (fgets(buf, len, fp))
-		ptr = chomp(buf);
-	fclose(fp);
-
+	ptr = strchr(buf, '/');
 	if (ptr) {
-		ptr = strchr(ptr, '/');
-		if (ptr) {
-			memmove(buf, ptr, strlen(ptr) + 1);
-			return buf;
-		}
+		memmove(buf, ptr, strlen(ptr) + 1);
+		return buf;
 	}
 
 	free(buf);
+
 	return NULL;
 }
 

@@ -470,6 +470,52 @@ done:
 	}
 }
 
+static int kmod_exists(const char *mod)
+{
+	char buf[256];
+	int found = 0;
+	FILE *fp;
+
+	fp = fopen("/proc/modules", "r");
+	if (!fp)
+		return 0;
+
+	while (!found && fgets(buf, sizeof(buf), fp)) {
+		const char *kmod = strtok(buf, " \t");
+
+		if (kmod && !strcmp(kmod, mod))
+			found = 1;
+	}
+	fclose(fp);
+
+	return found;
+}
+
+/*
+ * Load a kernel module during bootstrap
+ */
+void kmod_load(char *mod)
+{
+	char module[64] = { 0 };
+	char cmd[CMD_SIZE];
+
+	if (runlevel != INIT_LEVEL)
+		return;
+
+	/* Strip args for progress below and kmod_exists() */
+	strlcpy(module, mod, sizeof(module));
+	if (!strtok(module, " \t"))
+		return;
+
+	if (kmod_exists(module))
+		return;
+
+	strcpy(cmd, "modprobe ");
+	strlcat(cmd, mod, sizeof(cmd));
+
+	run_interactive(cmd, "Loading kernel module %s", module);
+}
+
 /*
  * Bring up networking, but only if not single-user or rescue mode
  */

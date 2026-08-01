@@ -199,6 +199,20 @@ typedef struct svc {
 	int		       num_supgroups;
 	char	       capabilities[MAX_CMD_LEN];
 
+	/* Directories set up for the service, block format only, the
+	 * name is resolved under a fixed base, e.g. /run/NAME */
+#define NUM_SVCDIRS 5
+	char	       runtime_dir[MAX_ARG_LEN];
+	char	       state_dir[MAX_ARG_LEN];
+	char	       cache_dir[MAX_ARG_LEN];
+	char	       logs_dir[MAX_ARG_LEN];
+	char	       config_dir[MAX_ARG_LEN];
+	mode_t	       dir_mode[NUM_SVCDIRS];
+#define SVC_DIR_PRESERVE_NO      0	/* remove runtime-dir on stop  */
+#define SVC_DIR_PRESERVE_RESTART 1	/* keep it across restarts     */
+#define SVC_DIR_PRESERVE_YES     2	/* never remove it             */
+	char	       dir_preserve;
+
 	/* Command, arguments and service description */
 	char	       cmd[MAX_CMD_LEN];
 	char	       args[MAX_NUM_SVC_ARGS][MAX_CMD_LEN];
@@ -221,9 +235,11 @@ typedef struct svc {
 
 	/* When set, used instead of SIGHUP or stop-start */
 	char	       reload_script[MAX_CMD_LEN];
+	int	       reload_tmo;
 
 	/* When set, used instead of SIGTERM or sysv 'stop' */
 	char	       stop_script[MAX_CMD_LEN];
+	int	       stop_tmo;
 
 	/*
 	 * Used to forcefully kill services that won't shutdown on

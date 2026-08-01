@@ -3,18 +3,18 @@ Runparts & `/etc/rc.local`
 
 At the end of the boot, when all bootstrap (`S`) tasks and services have
 started, but not networking, Finit calls its built-in [run-parts(8)][]
-command on any configured `runparts <DIR>` directory.  This happens just
+command on any configured `runparts = "DIR"` directory.  This happens just
 before changing to the configured runlevel (default 2).  (Networking is
 enabled just prior to changing from single user mode.)
 
-```shell
-runparts /etc/rc.d/
+```aconf
+runparts = "/etc/rc.d/"
 ```
 
 Right after the runlevel change when all services have started properly,
 `/etc/rc.local` is called.
 
-No configuration stanza in `/etc/finit.conf` is required for `rc.local`.
+No setting in `/etc/finit.conf` is required for `rc.local`.
 If it exists and is an executable shell script Finit calls it at the very
 end of the boot, before calling the `HOOK_SYSTEM_UP`.  See more in the
 [Hook Scripts](plugins.md#hooks) section.

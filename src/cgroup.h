@@ -26,6 +26,9 @@
 
 #include <uev/uev.h>
 
+#define CGROUP_NAME_SIZE     16
+#define CGROUP_SETTINGS_SIZE 128
+
 /* Forward declaration */
 typedef struct svc svc_t;
 

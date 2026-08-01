@@ -65,6 +65,25 @@ uev_ctx_t *ctx;		/* Main loop context */
 svc_t     *wdog;	/* No watchdog by default */
 char      *arg0;	/* Saved for setprocnm() */
 
+/*
+ * --enable-fastboot => fsck_mode: NULL => no fsck by default
+ * --enable-fsckfix  => fsck_mode: "-f" + fsck_repair: "y"
+ */
+#ifdef FSCK_FIX
+# ifdef FAST_BOOT
+char *fsck_mode = NULL;
+# else
+char *fsck_mode = "-f";
+# endif
+char *fsck_repair = "-y";
+#else
+# ifdef FAST_BOOT
+char *fsck_mode = NULL;
+# else
+char *fsck_mode = "";
+# endif
+char *fsck_repair = "-p";
+#endif
 
 /*
  * Show user configured banner before service bootstrap progress

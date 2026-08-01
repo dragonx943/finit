@@ -41,7 +41,7 @@ The `bool` setting is one of `on, off, true false, 1, 0`.
 
    Useful when starting up in various [rescue mode][rescue], factory, or
    production test setups.  Use the top-level configuration file
-   directive `rcsd /path/to/finit.d` to override the default rcS.d
+   setting `rcsd = "/path/to/finit.d"` to override the default rcS.d
    directory.
 
 * `finit.debug[=bool]`: Enable finit debug.  This is operated
@@ -104,8 +104,9 @@ The `bool` setting is one of `on, off, true false, 1, 0`.
 * `single`, or `S`: Overrides the configured runlevel (default: 2) to go
     to after bootstrap by forcing it to runlevel 1, this is also known
     as single user mode.  Useful to debug startup problems.  All services
-    and TTYs in `[1]` will be started, so a `tty [1] @console nologin`
-    configuration presents you with a root console without login.
+    and TTYs in runlevel 1 will be started, so a `tty` block with
+    `runlevel = "1"`, `device = "@console"`, and `nologin = true`
+    presents you with a root console without login.
 
  * `1-9`, except `6`: override the configured `runlevel`.  Like the `S`
    and `rescue`, giving a single number on the kernel command line tells

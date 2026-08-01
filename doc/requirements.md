@@ -15,7 +15,11 @@ done slightly differently and on systems with udev you might want to add
 the following one-shot task early in your `/etc/finit.conf`:
 
 ```conf
-run [S] udevadm settle --timeout=120 -- Waiting for udev
+run udevadm {
+    description = "Waiting for udev"
+    runlevel    = "S"
+    command     = "udevadm settle --timeout=120"
+}
 ```
 
 Finit has a built-in Getty for TTYs, but requires a working `/bin/login`

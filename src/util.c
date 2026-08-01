@@ -33,6 +33,7 @@
 #include <regex.h>
 #include <string.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #ifdef HAVE_TERMIOS_H
 # include <termios.h>
@@ -43,8 +44,10 @@
 #ifdef HAVE_SYS_IOCTL_H
 # include <sys/ioctl.h>
 #endif
+#include <sys/resource.h>
+#include <ftw.h>		/* rmrf() */
 #include <sys/sysinfo.h>	/* sysinfo() */
-#include <sys/vfs.h> /* statfs */
+#include <sys/vfs.h>		/* statfs */
 #include <linux/magic.h>
 #ifdef _LIBITE_LITE
 # include <libite/lite.h>
@@ -106,6 +109,34 @@ static char *signames[] = {
 	"IO",
 	"PWR",
 	"SYS",
+};
+
+struct rlimit_name {
+	char *name;
+	int val;
+};
+
+static const struct rlimit_name rlimit_names[] = {
+	{ "as",         RLIMIT_AS         },
+	{ "core",       RLIMIT_CORE       },
+	{ "cpu",        RLIMIT_CPU        },
+	{ "data",       RLIMIT_DATA       },
+	{ "fsize",      RLIMIT_FSIZE      },
+	{ "locks",      RLIMIT_LOCKS      },
+	{ "memlock",    RLIMIT_MEMLOCK    },
+	{ "msgqueue",   RLIMIT_MSGQUEUE   },
+	{ "nice",       RLIMIT_NICE       },
+	{ "nofile",     RLIMIT_NOFILE     },
+	{ "nproc",      RLIMIT_NPROC      },
+	{ "rss",        RLIMIT_RSS        },
+	{ "rtprio",     RLIMIT_RTPRIO     },
+#ifdef RLIMIT_RTTIME
+	{ "rttime",     RLIMIT_RTTIME     },
+#endif
+	{ "sigpending", RLIMIT_SIGPENDING },
+	{ "stack",      RLIMIT_STACK      },
+
+	{ NULL, 0 }
 };
 
 /* https://freedesktop.org/software/systemd/man/systemd.exec.html#id-1.20.8 */
@@ -280,25 +311,85 @@ int getcgroup(char *buf, size_t len)
 	return 0;
 }
 
-int mksubsys(const char *dir, mode_t mode, char *user, char *group)
+static int rmrf_cb(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftw)
+{
+	(void)sb;
+	(void)tflag;
+
+	if (ftw->level == 0)
+		return 0;
+
+	if (remove(fpath) && errno != EBUSY)
+		warn("Failed removing %s", fpath);
+
+	return 0;
+}
+
+/* nftw() cannot pass user data, see also tmpfiles.c do_clean() */
+static uid_t chownr_uid;
+static gid_t chownr_gid;
+
+static int chownr_cb(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftw)
+{
+	(void)tflag;
+	(void)ftw;
+
+	if (sb->st_uid == chownr_uid && sb->st_gid == chownr_gid)
+		return 0;
+
+	if (lchown(fpath, chownr_uid, chownr_gid))
+		warn("Failed chown(%s, %d, %d)", fpath, (int)chownr_uid, (int)chownr_gid);
+
+	return 0;
+}
+
+/* chown -R */
+int chownr(const char *path, uid_t uid, gid_t gid)
+{
+	chownr_uid = uid;
+	chownr_gid = gid;
+
+	return nftw(path, chownr_cb, 20, FTW_PHYS);
+}
+
+/* empty a directory but keep it, silently ignores a missing path */
+int rmcontents(const char *path)
+{
+	if (!fisdir(path))
+		return 0;
+
+	return nftw(path, rmrf_cb, 20, FTW_DEPTH | FTW_PHYS);
+}
+
+/* rm -rf, silently ignores a missing path */
+int rmrf(const char *path)
+{
+	if (!fisdir(path))
+		return 0;
+
+	nftw(path, rmrf_cb, 20, FTW_DEPTH | FTW_PHYS);
+	if (remove(path) && errno != ENOENT)
+		warn("Failed removing path %s", path);
+
+	return 0;
+}
+
+/*
+ * Like mksubsys() but with the ids already resolved, uid -1 skips the
+ * chown.  Parents are created 0755, only the leaf gets @mode.
+ */
+int mksubsysd(const char *dir, mode_t mode, uid_t uid, gid_t gid)
 {
 	mode_t omask;
-	int uid, gid;
-	int rc = 0;
+	int rc;
 
 	omask = umask(0);
 
-	uid = getuser(user, NULL);
-	if (uid >= 0) {
-		gid = getgroup(group);
-		if (gid < 0)
-			gid = 0;
-
-		rc = makedir(dir, mode);
-		if (rc && errno == EEXIST)
-			rc = chmod(dir, mode);
-		if (chown(dir, uid, gid))
-			err(1, "Failed chown(%s, %d, %d)", dir, uid, gid);
+	rc = mkpath(dir, 0755);
+	if (!rc) {
+		rc = chmod(dir, mode);
+		if (!rc && uid != (uid_t)-1 && chown(dir, uid, gid))
+			err(1, "Failed chown(%s, %d, %d)", dir, (int)uid, (int)gid);
 	}
 
 	umask(omask);
@@ -306,34 +397,123 @@ int mksubsys(const char *dir, mode_t mode, char *user, char *group)
 	return rc;
 }
 
-int fnread(char *buf, size_t len, char *fmt, ...)
+int mksubsys(const char *dir, mode_t mode, char *user, char *group)
 {
-	char path[256];
-	va_list ap;
-	FILE *fp;
+	int uid, gid;
 
-	va_start(ap, fmt);
-	vsnprintf(path, sizeof(path), fmt, ap);
-	va_end(ap);
+	uid = getuser(user, NULL);
+	gid = getgroup(group);
+	if (gid < 0)
+		gid = 0;
+	if (uid < 0)
+		warnx("Cannot find user %s, %s is owned by root", user, dir);
 
-	if (!buf || !len) {
-		struct stat st;
+	return mksubsysd(dir, mode, uid < 0 ? (uid_t)-1 : (uid_t)uid, (gid_t)gid);
+}
 
-		if (stat(path, &st))
-			return -1;
+/*
+ * Read an open stream to EOF into a malloc()'ed, NUL terminated buffer.
+ *
+ * st_size is only a hint here, and zero on procfs, so the read loop
+ * runs until EOF rather than trusting it.  Sizing from the already
+ * open fd also leaves no window for the file to change between the
+ * look and the read.
+ */
+static char *slurp(FILE *fp, size_t *lenp)
+{
+	size_t len = 0, size = BUFSIZ;
+	struct stat st;
+	char *buf;
 
-		return (ssize_t)st.st_size;
+	if (!fstat(fileno(fp), &st) && st.st_size > 0 && (size_t)st.st_size > size)
+		size = (size_t)st.st_size;
+
+	buf = malloc(size + 1);
+	if (!buf)
+		return NULL;
+
+	while (1) {
+		char *ptr;
+
+		len += fread(&buf[len], 1, size - len, fp);
+		if (len < size)
+			break;		/* EOF, or error caught below */
+
+		ptr = realloc(buf, size * 2 + 1);
+		if (!ptr) {
+			free(buf);
+			return NULL;
+		}
+		buf = ptr;
+		size *= 2;
 	}
 
-	fp = fopen(path, "r");
-	if (!fp)
-		return -1;
+	if (ferror(fp)) {
+		free(buf);
+		return NULL;
+	}
 
-	len = fread(buf, sizeof(char), len - 1, fp);
 	buf[len] = 0;
+	if (lenp)
+		*lenp = len;
+
+	return buf;
+}
+
+/*
+ * Read a whole file into a malloc()'ed, NUL terminated buffer, which
+ * the caller frees.  @lenp, when given, returns the number of bytes
+ * read; the content may itself contain NUL, e.g. /proc/PID/cmdline.
+ */
+char *vfslurp(size_t *lenp, const char *fmt, va_list ap)
+{
+	char *buf;
+	FILE *fp;
+
+	fp = vfopenf("r", fmt, ap);
+	if (!fp)
+		return NULL;
+
+	buf = slurp(fp, lenp);
 	fclose(fp);
 
-	return (int)len;
+	return buf;
+}
+
+char *fslurp(size_t *lenp, const char *fmt, ...)
+{
+	va_list ap;
+	char *buf;
+
+	va_start(ap, fmt);
+	buf = vfslurp(lenp, fmt, ap);
+	va_end(ap);
+
+	return buf;
+}
+
+int fnread(char *buf, size_t len, char *fmt, ...)
+{
+	size_t dlen;
+	va_list ap;
+	char *data;
+
+	va_start(ap, fmt);
+	data = vfslurp(&dlen, fmt, ap);
+	va_end(ap);
+
+	if (!data)
+		return -1;
+
+	if (buf && len) {
+		if (dlen > len - 1)
+			dlen = len - 1;
+		memcpy(buf, data, dlen);
+		buf[dlen] = 0;
+	}
+	free(data);
+
+	return (int)dlen;
 }
 
 int fnwrite(char *value, char *fmt, ...)
@@ -483,6 +663,50 @@ char *code2str(int code)
 	return exitcodes[code];
 }
 
+int str2rlim(char *str)
+{
+	const struct rlimit_name *rn;
+
+	for (rn = rlimit_names; rn->name; rn++) {
+		if (!strcmp(str, rn->name))
+			return rn->val;
+	}
+
+	return -1;
+}
+
+char *rlim2str(int rlim)
+{
+	const struct rlimit_name *rn;
+
+	for (rn = rlimit_names; rn->name; rn++) {
+		if (rn->val == rlim)
+			return rn->name;
+	}
+
+	return "unknown";
+}
+
+char *lim2str(struct rlimit *rlim)
+{
+	char tmp[25];
+	static char buf[42];
+
+	buf[0] = 0;
+	if (RLIM_INFINITY == rlim->rlim_cur)
+		snprintf(tmp, sizeof(tmp), "unlimited, ");
+	else
+		snprintf(tmp, sizeof(tmp), "%llu, ", (unsigned long long)rlim->rlim_cur);
+	strlcat(buf, tmp, sizeof(buf));
+
+	if (RLIM_INFINITY == rlim->rlim_max)
+		snprintf(tmp, sizeof(tmp), "unlimited, ");
+	else
+		snprintf(tmp, sizeof(tmp), "%llu, ", (unsigned long long)rlim->rlim_max);
+	strlcat(buf, tmp, sizeof(buf));
+
+	return buf;
+}
 
 void do_sleep(unsigned int sec)
 {

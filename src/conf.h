@@ -27,6 +27,10 @@
 #include "cgroup.h"
 #include "svc.h"
 
+#include <sys/resource.h>
+
+#define BOOTSTRAP (runlevel == INIT_LEVEL)
+
 extern int   runlevel;
 extern int   cfglevel;
 extern int   cmdlevel;
@@ -46,31 +50,39 @@ extern char *hostname;
 extern char *runparts;
 extern char *osheading;
 
-extern int logfile_size_max;
-extern int logfile_count_max;
+extern int   runparts_progress;
+extern int   runparts_sysv;
 
-extern struct rlimit global_rlimit[];
-extern char cgroup_current[];
-extern char cgroup_settings_current[];
-extern int  cgroup_delegate_current;
+extern int   logfile_size_max;
+extern int   logfile_count_max;
 
-int   str2rlim(char *str);
-char *rlim2str(int rlim);
+extern char  cgroup_current[CGROUP_NAME_SIZE];
+extern char  cgroup_settings_current[CGROUP_SETTINGS_SIZE];
+extern int   cgroup_delegate_current;
 
-int  conf_init            (uev_ctx_t *ctx);
-void conf_reload          (void);
-int  conf_any_change      (void);
-int  conf_changed         (char *file);
-int  conf_monitor         (void);
+extern struct rlimit initial_rlimit[RLIMIT_NLIMITS];
+extern struct rlimit global_rlimit[RLIMIT_NLIMITS];
 
-void conf_reset_env       (void);
-void conf_saverc          (void);
-void conf_save_exec_order (svc_t *svc, char *cmdline, int result);
-void conf_save_service    (int type, char *cfg, char *file);
-void conf_parse_cmdline   (int argc, char *argv[]);
-char *conf_parse_env      (char *line, char **val);
-int  conf_parse_runlevels (char *runlevels);
-void conf_parse_cond      (svc_t *svc, char *cond);
+int   conf_init            (uev_ctx_t *ctx);
+int   conf_reload          (void);
+int   conf_any_change      (void);
+int   conf_changed         (char *file);
+int   conf_monitor         (void);
+
+void  conf_saverc          (void);
+void  conf_save_exec_order (svc_t *svc, char *cmdline, int result);
+void  conf_save_service    (int type, char *cfg, char *file);
+void  conf_parse_cmdline   (int argc, char *argv[]);
+
+void  conf_reset_env       (void);
+void  conf_set_env         (char *line);
+char *conf_parse_env       (char *line, char **val);
+
+void  conf_parse_rlimit    (char *line, struct rlimit arr[]);
+int   conf_parse_runlevels (const char *runlevels);
+void  conf_parse_cond      (svc_t *svc, char *cond);
+int   conf_parse_file      (char *file, int is_rcsd);
+
 
 #endif	/* FINIT_CONF_H_ */
 

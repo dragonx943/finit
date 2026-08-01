@@ -59,6 +59,7 @@ finit_SOURCES      = api.c	cgroup.c	cgroup.h	\
 		     clone3.c	clone3.h			\
 		     cond.c	cond-w.c	cond.h		\
 		     conf.c	conf.h				\
+		     legacy.c	legacy.h			\
 		     devmon.c   devmon.h			\
 		     exec.c	finit.c		finit.h		\
 		     		stty.c				\
@@ -86,8 +87,8 @@ pkginclude_HEADERS = cgroup.h cond.h conf.h finit.h helpers.h log.h \
 
 finit_CPPFLAGS     = $(AM_CPPFLAGS) -D__FINIT__
 finit_CFLAGS       = -W -Wall -Wextra -Wno-unused-parameter -std=gnu99
-finit_CFLAGS      += $(lite_CFLAGS) $(uev_CFLAGS)
-finit_LDADD        = $(lite_LIBS) $(uev_LIBS)
+finit_CFLAGS      += $(lite_CFLAGS) $(uev_CFLAGS) $(confuse_CFLAGS)
+finit_LDADD        = $(lite_LIBS) $(uev_LIBS) $(confuse_LIBS)
 if STATIC
 finit_LDADD       += ../plugins/libplug.la
 else

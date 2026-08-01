@@ -171,7 +171,11 @@ Notice the `--` separator.
 To debug startup issues, in particular issues with getty/login, add
 the following to your Finit .conf file:
 
-    tty [12345789] notty noclear
+    tty board {
+        runlevel = "12345789"
+        notty    = true
+        noclear  = true
+    }
 
 The `notty` option ensures reusing the stdin/stdout set up by the
 kernel.  Remember, this is only for debugging and would leave your

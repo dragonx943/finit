@@ -29,8 +29,10 @@
 #include <ctype.h>
 #ifdef HAVE_TERMIOS_H
 #include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <sys/reboot.h>
+#include <sys/resource.h>
 #include <termios.h>
 #endif
 
@@ -55,6 +57,7 @@ extern char *prognm;
 # include <lite/conio.h>
 # include <lite/lite.h>
 #endif
+
 #include "log.h"
 
 char *progname     (char *arg0);
@@ -69,7 +72,13 @@ int   getcuser     (char *buf, size_t len);
 int   getcgroup    (char *buf, size_t len);
 
 int   mksubsys     (const char *dir, mode_t mode, char *user, char *group);
+int   mksubsysd    (const char *dir, mode_t mode, uid_t uid, gid_t gid);
+int   chownr       (const char *path, uid_t uid, gid_t gid);
+int   rmcontents   (const char *path);
+int   rmrf         (const char *path);
 
+char *fslurp       (size_t *lenp, const char *fmt, ...)    __attribute__ ((format (printf, 2, 3)));
+char *vfslurp      (size_t *lenp, const char *fmt, va_list ap);
 int   fnread       (char *buf, size_t len, char *fmt, ...) __attribute__ ((format (printf, 3, 4)));
 int   fnwrite      (char *value, char *fmt, ...)           __attribute__ ((format (printf, 2, 3)));
 int   fngetint     (char *path, int *val);
@@ -80,6 +89,10 @@ int   strtobytes   (char *arg);
 char *sig2str      (int sig);
 int   str2sig      (char *sig);
 char *code2str     (int code);
+
+int   str2rlim     (char *str);
+char *rlim2str     (int rlim);
+char *lim2str      (struct rlimit *rlim);
 
 void  do_sleep     (unsigned int sec);
 void  do_usleep    (unsigned int usec);

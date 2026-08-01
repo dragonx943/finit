@@ -5,51 +5,151 @@
 # often needs to be synchronized carefully, we suggest using your system log
 # daemon as the barrier for all other services.  E.g.:
 #
-#    service if:udevd <run/udevadm:5/success> [S0123456789] syslogd -F -- System log daemon
-#    service if:mdev  <run/coldplug/success>  [S0123456789] syslogd -F -- System log daemon
-#    service if:mdevd <run/coldplug/success>  [S0123456789] syslogd -F -- System log daemon
+#    service syslogd {
+#        description = "System log daemon"
+#        runlevel    = "S0123456789"
+#        if          = "udevd"
+#        conditions  = { "run/udevadm:5/success" }
+#        command     = "syslogd -F"
+#    }
+#
+# with `if = "mdev"` or `if = "mdevd"` and the matching coldplug condition
+# for those variants.
 #
 # This provdes a <pid/syslogd> condition that can act as a barrier for all
-# other services.  Notice the `if:` statement and the condition for starting
+# other services.  Notice the `if` setting: the condition for starting
 # syslogd is only considered if either udevd or mdev (service) is loaded and
 # is guaranteed to run after each respective run stanza have completed.
 #
 # Override this file by copying it to /etc/finit.d/, using the same name, then
 # change the contents any way you like, it can even be empty.
+#
+# The leading '-' on every command says a missing binary is expected here, so
+# the block is skipped quietly and the next candidate gets its turn.
 
 # Check for systemd-udevd and eudev, if we find both, we opt for the latter.
-service nowarn cgroup.system,name:udevd name:udevd notify:none env:-/etc/default/udevd pid:udevd log \
-	[S12345789] /lib/systemd/systemd-udevd $UDEVD_ARGS -- Device event daemon (udev)
-service nowarn cgroup.system,name:udevd name:udevd notify:none env:-/etc/default/udevd pid:udevd log \
-	[S12345789] udevd $UDEVD_ARGS -- Device event daemon (udev)
+service udevd {
+	description    = "Device event daemon (udev)"
+	runlevel       = "S12345789"
+	notify         = "none"
+	envfile        = "-/etc/default/udevd"
+	pidfile        = "udevd"
+	pidfile-create = true
+	log { }
+	cgroup system { name = "udevd" }
+	command        = "-/lib/systemd/systemd-udevd $UDEVD_ARGS"
+}
+service udevd {
+	description    = "Device event daemon (udev)"
+	runlevel       = "S12345789"
+	notify         = "none"
+	envfile        = "-/etc/default/udevd"
+	pidfile        = "udevd"
+	pidfile-create = true
+	log { }
+	cgroup system { name = "udevd" }
+	command        = "-udevd $UDEVD_ARGS"
+}
 
 # Wait for udevd to start, then trigger coldplug events and module loading.
 # The last 'settle' call waits for it to finalize processing all uevents.
-run nowarn if:udevd cgroup.init,name:udevadm :1 [S] <service/udevd/ready> log udevadm settle -t 0                  --
-run nowarn if:udevd cgroup.init,name:udevadm :2 [S] <service/udevd/ready> log udevadm control --reload             --
-run nowarn if:udevd cgroup.init,name:udevadm :3 [S] <service/udevd/ready> log udevadm trigger -c add -t devices    -- Requesting device events
-run nowarn if:udevd cgroup.init,name:udevadm :4 [S] <service/udevd/ready> log udevadm trigger -c add -t subsystems -- Requesting subsystem events
-run nowarn if:udevd cgroup.init,name:udevadm :5 [S] <service/udevd/ready> log udevadm settle -t 30                 -- Waiting for udev to finish
+run udevadm:1 {
+	runlevel   = "S"
+	if         = "udevd"
+	conditions = { "service/udevd/ready" }
+	log { }
+	cgroup init { name = "udevadm" }
+	command    = "-udevadm settle -t 0"
+}
+run udevadm:2 {
+	runlevel   = "S"
+	if         = "udevd"
+	conditions = { "service/udevd/ready" }
+	log { }
+	cgroup init { name = "udevadm" }
+	command    = "-udevadm control --reload"
+}
+run udevadm:3 {
+	description = "Requesting device events"
+	runlevel    = "S"
+	if          = "udevd"
+	conditions  = { "service/udevd/ready" }
+	log { }
+	cgroup init { name = "udevadm" }
+	command     = "-udevadm trigger -c add -t devices"
+}
+run udevadm:4 {
+	description = "Requesting subsystem events"
+	runlevel    = "S"
+	if          = "udevd"
+	conditions  = { "service/udevd/ready" }
+	log { }
+	cgroup init { name = "udevadm" }
+	command     = "-udevadm trigger -c add -t subsystems"
+}
+run udevadm:5 {
+	description = "Waiting for udev to finish"
+	runlevel    = "S"
+	if          = "udevd"
+	conditions  = { "service/udevd/ready" }
+	log { }
+	cgroup init { name = "udevadm" }
+	command     = "-udevadm settle -t 30"
+}
 
 # If udevd is not available, check for mdevd.  Unlike plain 'mdev -df', the
 # mdevd-coldplug process exits when mdevd has completed.  So the condition
-# <run/coldplug/success> (same as for plain mdev below) can be relied on as a
-# barrier for services that, e.g., need to probe for switchcore ports or PHYs
-# that require firmware loading before they show up.
-service nowarn conflict:udevd,mdev cgroup.init,name:mdevd notify:none if:!udevd \
-	[S12345789] notify:s6 mdevd -O 4 -D %n -- Device event daemon (mdevd)
-run     nowarn conflict:udevd,mdev cgroup.init,name:coldplug <service/mdevd/ready> \
-	[S] mdevd-coldplug -- Cold plugging system
+# <run/mdevd-coldplug/success> can be relied on as a barrier for services
+# that, e.g., need to probe for switchcore ports or PHYs that require
+# firmware loading before they show up.
+service mdevd {
+	description = "Device event daemon (mdevd)"
+	runlevel    = "S12345789"
+	if          = "!udevd"
+	conflicts   = { "udevd", "mdev" }
+	notify      = "s6"
+	cgroup init { name = "mdevd" }
+	command     = "-mdevd -O 4 -D %n"
+}
+
+# NOTE: this block is named for its command, so its barrier condition is
+#       <run/mdevd-coldplug/success>, not the <run/coldplug/success> the
+#       plain mdev stanza below provides.  The legacy line spelled the
+#       name inside the cgroup argument, where it names the cgroup leaf
+#       rather than the service, and the two paths have differed ever
+#       since.  Left as it was so boot ordering does not change.
+run mdevd-coldplug {
+	description = "Cold plugging system"
+	runlevel    = "S"
+	conflicts   = { "udevd", "mdev" }
+	conditions  = { "service/mdevd/ready" }
+	cgroup init { name = "coldplug" }
+	command     = "-mdevd-coldplug"
+}
 
 # If neither udevd or mdevd are available, fall back to mdev.  The new daemon
 # mode calls `mdev -s` internally but does not create a PID file when that is
 # done, so synchronization with coldplug is fragile.
-service nowarn conflict:udevd,mdevd cgroup.init,name:mdev notify:none if:!udevd,!mdevd \
-	[S12345789] mdev -df -S -- Device event daemon (mdev)
+service mdev {
+	description = "Device event daemon (mdev)"
+	runlevel    = "S12345789"
+	if          = "!udevd,!mdevd"
+	conflicts   = { "udevd", "mdevd" }
+	notify      = "none"
+	cgroup init { name = "mdev" }
+	command     = "-mdev -df -S"
+}
 
 # Trigger a replay of all uevents from boot, before userspace was up and the
 # filesystem mounted.  Compared to udevd, we don't know when 'mdev -df' has
 # finished processing all events, i.e., depending on <run/coldplug/success> is
 # not an indicator of all devices having been (re)discovered and fully set up.
-run nowarn conflict:udevd,mdevd cgroup.init name:coldplug if:mdev <service/mdev/running> \
-	[S] @pkglibexecdir@/coldplug -- Cold plugging system
+run coldplug {
+	description = "Cold plugging system"
+	runlevel    = "S"
+	if          = "mdev"
+	conflicts   = { "udevd", "mdevd" }
+	conditions  = { "service/mdev/running" }
+	cgroup init {}
+	command     = "-@pkglibexecdir@/coldplug"
+}

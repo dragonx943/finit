@@ -18,9 +18,9 @@ waits for user input before handing over to `/bin/login`, which is
 responsible for handling the actual authentication.
 
 ```conf
-tty [12345] /dev/tty1    nowait  linux
-tty [12345] /dev/ttyAMA0 noclear vt100
-tty [12345] /sbin/getty  -L /dev/ttyAMA0 vt100
+tty tty1   { runlevel = "12345"  device = "/dev/tty1"     term = "linux"  nowait = true }
+tty ttyAMA0 { runlevel = "12345"  device = "/dev/ttyAMA0"  term = "vt100"  noclear = true }
+tty getty   { runlevel = "12345"  command = "/sbin/getty -L /dev/ttyAMA0 vt100" }
 ```
 
 Users of embedded systems may want to enable automatic serial console
@@ -29,7 +29,7 @@ system uses `ttyS0`, `ttyAMA0`, `ttyMXC0`, or anything else.  Finit
 figures it out by querying sysfs: `/sys/class/tty/console/active`.
 
 ```conf
-tty [12345] @console linux noclear
+tty console { runlevel = "12345"  device = "@console"  term = "linux"  noclear = true }
 ```
 
 Notice the optional `noclear`, `nowait`, and `nologin` flags.  The
@@ -40,21 +40,21 @@ see the [TTY and Consoles](config/tty.md) section.
 **Runlevels**
 
 Support for SysV init-style [runlevels][5] is available, in the same
-minimal style as everything else in Finit.  The `[2345]` syntax can be
-applied to service, task, run, and TTY stanzas.
+minimal style as everything else in Finit.  The `runlevel` setting
+applies to service, task, run, and tty blocks alike.
 
 Reserved runlevels are 0 and 6, halt and reboot, respectively just like
 SysV init.  Runlevel 1 can be configured freely, but is recommended to
 be kept as the system single-user runlevel since Finit will not start
-networking here.  The configured `runlevel NUM` from `/etc/finit.conf`
+networking here.  The configured `runlevel` from `/etc/finit.conf`
 is what Finit changes to after bootstrap, unless 'single' (or 'S') is
 given on the kernel cmdline, in which case runlevel 1 is started.
 
-All services in runlevel S) are started first, followed by the desired
+All services in runlevel S are started first, followed by the desired
 run-time runlevel.  Run tasks in runlevel S can be started in sequence
-by using `run [S] cmd`.  Changing runlevels at runtime is done like any
-other init, e.g. <kbd>init 4</kbd>, but also using the more advanced
-[`initctl`](initctl.md) tool.
+by using a `run` block with `runlevel = "S"`.  Changing runlevels at
+runtime is done like any other init, e.g. <kbd>init 4</kbd>, but also
+using the more advanced [`initctl`](initctl.md) tool.
 
 
 **Conditions**
@@ -86,8 +86,17 @@ the condition `<hw/model/foo>` when starting other scripts.  Here is an
 example:
 
 ```
-run  [S]                /path/to/ident    --
-task [2] <hw/model/foo> /path/to/foo-init -- Initializing Foo board
+run ident {
+    description = ""
+    runlevel    = "S"
+    command     = "/path/to/ident"
+}
+task foo-init {
+    description = "Initializing Foo board"
+    runlevel    = "2"
+    conditions  = { "hw/model/foo" }
+    command     = "/path/to/foo-init"
+}
 ```
 
 > [!TIP]
@@ -141,17 +150,20 @@ required privileges instead of running as root. This improves security by
 following the principle of least privilege.
 
 ```conf
-service [2345] name:nginx \
-        www-data:www-data \
-        caps:^cap_net_bind_service \
-        /usr/sbin/nginx -g 'daemon off;'
+service nginx {
+    runlevel     = "2345"
+    user         = "www-data"
+    group        = "www-data"
+    capabilities = { "^cap_net_bind_service" }
+    command      = "/usr/sbin/nginx -g 'daemon off;'"
+}
 ```
 
 In this example, nginx runs as the unprivileged `www-data` user but retains
 the ability to bind to privileged ports (80, 443) through the
 `cap_net_bind_service` capability.
 
-The `caps:` directive uses the IAB (Inheritable, Ambient, Bounding) format:
+The `capabilities` list uses the IAB (Inheritable, Ambient, Bounding) format:
 - `^` = Ambient (recommended) - capabilities survive exec()
 - `%` = Inheritable only - requires file capabilities
 - `!` = Bounding - block from acquiring capability
@@ -159,7 +171,7 @@ The `caps:` directive uses the IAB (Inheritable, Ambient, Bounding) format:
 Multiple capabilities can be specified as comma-separated:
 
 ```conf
-caps:^cap_net_raw,^cap_net_admin,!cap_sys_admin
+capabilities = { "^cap_net_raw", "^cap_net_admin", "!cap_sys_admin" }
 ```
 
 See the [Linux Capabilities](config/capabilities.md) section for detailed
@@ -210,15 +222,19 @@ The name of each sub-group is taken from the username.
 
 A fourth group also exists, the `root` group.  It is also _reserved_ and
 primarily intended for RT tasks.  If you have RT tasks they need to be
-declared as such in their service stanza like this:
+declared as such in their service block like this:
 
-    service [...] <...> cgroup.root /path/to/foo args -- description
+    service foo {
+        cgroup root {}
+        command = "/path/to/foo args"
+    }
 
-or
+Every block names the group it joins, so a second RT task says so too:
 
-    cgroup.root
-    service [...] <...> /path/to/foo args -- description
-    service [...] <...> /path/to/bar args -- description
+    service bar {
+        cgroup root {}
+        command = "/path/to/bar args"
+    }
 
 See the [Cgroups](config/cgroups.md) section for more information, e.g.,
 how to configure per-group limits.

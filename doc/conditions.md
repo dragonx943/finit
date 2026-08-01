@@ -7,18 +7,26 @@ mechanism for common synchronization problems.  For example:
 - *"wait for service A to start before starting service B"*, or
 - *"wait for basic network access to be available"*
 
-Conditions are similar in syntax to declaring runlevels per service.
-They are specified within angle brackets `<>` and can be applied to any
-of the `service`, `task`, or `run` stanza.  Multiple conditions may be
-specified separated by comma.  Multiple conditions are logically AND'ed
+A condition is named in the `conditions` list of a `service`, `task`, or
+`run` block.  The list may hold several, and they are logically AND'ed
 during evaluation, i.e. all conditions must be satisfied in order for a
-service to run.
+service to run.  In running text, and in `initctl` output, a condition
+is written inside angle brackets, `<pid/syslogd>`.
 
-Two special prefixes can be used inside the angle brackets:
+One prefix can be used on a condition:
 
- - `!` -- service does not support `SIGHUP` (noreload), or run/task
-   should not block runlevel changes (i.e., bootstrap)
  - `~` -- propagate reload from this dependency, see below
+
+The line-based format also accepts a leading `!` on the list, which is
+not a condition and not a negation.  It is a flag on the block, and it
+means two unrelated things depending on where it sits: a service does
+not support `SIGHUP` (noreload), or a run/task should not block
+runlevel changes, i.e. bootstrap.  Each of those is its own key here:
+
+| Line-based | Block format |
+|---|---|
+| `<!...>` on a service or sysv | `reload-signal = "none"` |
+| `<!...>` on a run or task | `required = false` |
 
 Finit guarantees by default that all run/tasks run (at least) once
 per runlevel.  For most tasks this is a good default, for example
@@ -27,7 +35,12 @@ that are unlikely to happen it is not. (See example below.)
 
 ### Example
 
-    service [2345] <pid/setupd,pid/zebra> /sbin/netd -- Network monitor
+    service netd {
+        description = "Network monitor"
+        runlevel    = "2345"
+        conditions  = { "pid/setupd", "pid/zebra" }
+        command     = "/sbin/netd"
+    }
 
 In this example the Network monitor daemon `netd` is not started until
 both the `pid/setupd` *and* `pid/zebra` conditions are satisfied.  A
@@ -42,15 +55,28 @@ being created, i.e., the service's default readiness notification.
 Another example is `dropbear`, it does not support `SIGHUP`, but we can
 also see optional sourcing of arguments from an environment file:
 
-    service [2345789] <!> env:-/etc/default/dropbear dropbear -F -R $DROPBEAR_ARGS -- Dropbear SSH daemon
+    service dropbear {
+        description   = "Dropbear SSH daemon"
+        runlevel      = "2345789"
+        reload-signal = "none"
+        envfile       = "-/etc/default/dropbear"
+        command       = "dropbear -F -R $DROPBEAR_ARGS"
+    }
 
 Finally, the weird "block runlevel changes" example.  Here we see what
 happens when Finit receives `SIGPWR`, sent from a power daemon like
 [powstatd(8)][].  A condition is asserted and a user can set up their
 own task to act on it.  We do not want this task to block Finit from
-moving to the next runlevel after bootstrap, so we set `<!>`:
+moving to the next runlevel after bootstrap, so we set
+`required = false`:
 
-    task [S0123456789] <!sys/pwr/fail> name:pwrfail initctl poweroff -- Power failure, shutting down
+    task pwrfail {
+        description = "Power failure, shutting down"
+        runlevel    = "S0123456789"
+        conditions  = { "sys/pwr/fail" }
+        required    = false
+        command     = "initctl poweroff"
+    }
 
 
 Propagating Reload in Dependencies
@@ -65,13 +91,23 @@ not care if it reloads its config.
 For services that need to react when their upstream reloads, the `~`
 prefix propagates the reload from the dependency:
 
-    service <pid/svc_a>   name:svc_b /sbin/svc_b -- Needs A (barrier)
-    service <!~pid/svc_b> name:svc_c /sbin/svc_c -- Propagate reload from B
+    service svc_b {
+        description = "Needs A (barrier)"
+        conditions  = { "pid/svc_a" }
+        command     = "/sbin/svc_b"
+    }
+
+    service svc_c {
+        description   = "Propagate reload from B"
+        conditions    = { "~pid/svc_b" }
+        reload-signal = "none"
+        command       = "/sbin/svc_c"
+    }
 
 Here, `<~pid/svc_b>` means: propagate a reload of `svc_b` to `svc_c`.
-When `svc_b` reloads, `svc_c` will be restarted (because of `!`,
-noreload) instead of merely resumed.  If `svc_c` supported `SIGHUP`
-(no `!` prefix), it would be sent `SIGHUP` instead.
+When `svc_b` reloads, `svc_c` will be restarted, because of
+`reload-signal = "none"`, instead of merely resumed.  If `svc_c`
+supported `SIGHUP`, it would be sent `SIGHUP` instead.
 
 This is similar to systemd's `PropagatesReloadTo=` directive, but
 declared on the consumer side rather than the provider side.
@@ -103,7 +139,12 @@ services, or run/task jobs, on external site-dependent stimuli.
 
 **Example:**
 
-    service [2345] <usr/foo> alarm --arg foo -- Foo alarm
+    service alarm {
+        description = "Foo alarm"
+        runlevel    = "2345"
+        conditions  = { "usr/foo" }
+        command     = "alarm --arg foo"
+    }
 
 For convenience, prefixing with `usr/` is allowed, but any other slashes
 or period characters are disallowed.  E.g., to trigger the `Foo alarm`,
@@ -126,8 +167,9 @@ Static (one-shot) conditions, like `usr/`, never enter the `flux` state.
 > "touch" or recreate, their PID file on `SIGHUP`.  This can be done by
 > calling `utimensat()` on the PID file.  Provided, of course, that the
 > service supports reloading on `SIGHUP`, otherwise it will be restarted
-> by Finit when they instead exit on the signal.  For such services, use
-> `<!>` to tell Finit the service does not support `SIGHUP`.
+> by Finit when they instead exit on the signal.  For such services,
+> set `reload-signal = "none"` to tell Finit the service does not
+> support `SIGHUP`.
 
 
 Built-in Conditions
@@ -145,15 +187,15 @@ The `devmon` (built-in) plugin monitors `/dev` and `/dev/dir` for device
 nodes being created and removed.  It is active only when a run, task, or
 service has declared a `<dev/foo>` or `<dev/dir/bar>` condition.
 
-The `pidfile` plugin (recursively) watches `/run/` (recursively) for PID
-files created by the monitored services, and sets a corresponding
-condition in the `pid/` namespace.
+The `pidfile` plugin recursively watches `/run/` for PID files created
+by the monitored services, and sets a corresponding condition in the
+`pid/` namespace.
 
 Similarly, the `netlink` plugin provides basic conditions for when an
 interface is brought up/down and when a default route (gateway) is set,
 in the `net/` namespace.
 
-The `sys` and `usr` plugins monitor are passive condition monitors where
+The `sys` and `usr` plugins are passive condition monitors where
 the action is provided by `keventd`, signal handlers, and in the case of
 `usr`, the end-user via the `initctl` tool.
 
@@ -199,16 +241,16 @@ Composition
 -----------
 
 The `pid/` conditions are generated by the Finit `pidfile.so` plugin and
-composed from a service's `name:` and `:id`.  By default the basename of
-the daemon and the empty string.
+composed from a service's block title and its `:id`.  By default the
+basename of the daemon and the empty string.
 
-| **service**                                        | **condition**    |
-|----------------------------------------------------|------------------|
-| /sbin/foo                                          | pid/foo          |
-| /sbin/bar -p /run/baz.pid                          | pid/bar          |
-| name:lxc :foo lxc-start -n foo -p /run/lxc/foo.pid | pid/lxc:foo      |
-| /usr/bin/dbus-daemon                               | pid/dbus-daemon  |
-| :222 dropbear -p 222                               | pid/dropbear:222 |
+| **service**                                                       | **condition**    |
+|-------------------------------------------------------------------|------------------|
+| `service { command = "/sbin/foo" }`                                | pid/foo          |
+| `service { command = "/sbin/bar -p /run/baz.pid" }`               | pid/bar          |
+| `service lxc:foo { command = "lxc-start -n foo -p /run/lxc/foo.pid" }` | pid/lxc:foo  |
+| `service { command = "/usr/bin/dbus-daemon" }`                     | pid/dbus-daemon  |
+| `service dropbear:222 { command = "dropbear -p 222" }`             | pid/dropbear:222 |
 
 The condition is asserted when `pidfile.so` receives an inotify event
 for a file matching `/run/*.pid`, `/run/**/*.pid`, or `/run/**/pid`,
@@ -223,8 +265,8 @@ its conditions are cleared and reasserted, ensuring dependent services
 are properly updated.
 
 Daemons that don't create PID files, or fail to touch them on reload,
-can be worked around by using the `pid:/path/to/file.pid` syntax in
-the service stanza for the daemon.  It is far from optimal since any
+can be worked around by setting `pidfile` and `pidfile-create` in the
+service block for the daemon.  It is far from optimal since any
 synchronization of depending services may fail due to the daemon not
 having reinitialized/created their IPC sockets, or similar.
 
@@ -307,8 +349,8 @@ restarts that would otherwise occur because a depending service was sent
 
 Services with the `~` prefix are an exception to this rule: when their
 conditions return to `on` after being in `flux`, the reload is propagated
--- the service is reloaded (SIGHUP) or restarted (noreload `!`) instead
-of simply being resumed.
+-- the service is reloaded (SIGHUP), or restarted if it has
+`reload-signal = "none"`, instead of simply being resumed.
 
 Therefore, any plugin that supplies Finit with conditions must ensure
 that their state is updated after each reconfiguration.  This can be

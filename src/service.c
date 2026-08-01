@@ -66,6 +66,8 @@
 
 #define NOTIFY_PATH "@run/finit/notify/%d"
 
+int logfile_size_max = 200000;	/* 200 kB */
+int logfile_count_max = 5;
 
 /*
  * run tasks block other tasks/services from starting, we track the
@@ -568,6 +570,118 @@ static void set_uid(uid_t uid, svc_t *svc)
 		err(1, "%s: failed setuid(%d)", svc_ident(svc, NULL, 0), uid);
 }
 
+/*
+ * systemd-style per-service directories: created before each start,
+ * owned by the service user, and exported to the environment.  The
+ * runtime directory is removed again when the service stops, after
+ * any post: script has run.  See issue #492.
+ */
+const struct svcdir svcdirs[NUM_SVCDIRS] = {
+	{ "runtime-dir", "/run",       "RUNTIME_DIRECTORY",       offsetof(svc_t, runtime_dir), 1 },
+	{ "state-dir",   "/var/lib",   "STATE_DIRECTORY",         offsetof(svc_t, state_dir),   1 },
+	{ "cache-dir",   "/var/cache", "CACHE_DIRECTORY",         offsetof(svc_t, cache_dir),   1 },
+	{ "logs-dir",    "/var/log",   "LOGS_DIRECTORY",          offsetof(svc_t, logs_dir),    1 },
+	{ "config-dir",  "/etc",       "CONFIGURATION_DIRECTORY", offsetof(svc_t, config_dir),  0 },
+};
+
+static char *svcdir_path(svc_t *svc, const struct svcdir *sd, char *path, size_t len)
+{
+	char *name = (char *)svc + sd->off;
+
+	if (!name[0])
+		return NULL;
+
+	paste(path, len, sd->base, name);
+	return path;
+}
+
+/*
+ * Validate and set a per-service directory.  The value is a name
+ * resolved under sd->base, so an absolute path or an escape is
+ * refused with -1 and errno set.
+ */
+int service_set_dir(svc_t *svc, const struct svcdir *sd, const char *name)
+{
+	char *dir = (char *)svc + sd->off;
+
+	if (name[0] == '/' || strstr(name, "..")) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (strlcpy(dir, name, MAX_ARG_LEN) >= MAX_ARG_LEN) {
+		dir[0] = 0;
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+
+	return 0;
+}
+
+static void service_mkdirs(svc_t *svc, uid_t uid, gid_t gid)
+{
+	char path[256];
+	size_t i;
+
+	for (i = 0; i < NELEMS(svcdirs); i++) {
+		uid_t u = svcdirs[i].chown ? uid : (uid_t)-1;
+		gid_t g = svcdirs[i].chown ? gid : 0;
+		struct stat st;
+		char *ptr;
+
+		ptr = svcdir_path(svc, &svcdirs[i], path, sizeof(path));
+		if (!ptr)
+			continue;
+
+		/*
+		 * Same rules as systemd: the named directory has its mode
+		 * locked down again on every start, but its contents are
+		 * only touched when the owner has drifted, then everything
+		 * under it is chowned back.  Script forks land here too,
+		 * so this must be idempotent.
+		 */
+		if (stat(ptr, &st) == 0) {
+			chmod(ptr, svc->dir_mode[i]);
+			if (u != (uid_t)-1 && (st.st_uid != u || st.st_gid != g))
+				chownr(ptr, u, g);
+			continue;
+		}
+
+		/* only the named directory is chowned, like systemd */
+		if (mksubsysd(ptr, svc->dir_mode[i], u, g))
+			logit(LOG_WARNING, "%s: failed creating %s", svc_ident(svc, NULL, 0), ptr);
+	}
+}
+
+static void service_dir_env(svc_t *svc)
+{
+	char path[256];
+	size_t i;
+
+	for (i = 0; i < NELEMS(svcdirs); i++) {
+		if (svcdir_path(svc, &svcdirs[i], path, sizeof(path)))
+			setenv(svcdirs[i].env, path, 1);
+	}
+}
+
+static void service_rmdirs(svc_t *svc)
+{
+	char path[256];
+
+	/* only the runtime directory, /run is tmpfs, the rest persist */
+	if (!svcdir_path(svc, &svcdirs[0], path, sizeof(path)))
+		return;
+
+	if (svc->dir_preserve == SVC_DIR_PRESERVE_YES)
+		return;
+
+	/* still qualified to run means this is a restart, not a stop */
+	if (svc->dir_preserve == SVC_DIR_PRESERVE_RESTART && svc_enabled(svc))
+		return;
+
+	rmrf(path);
+}
+
 static pid_t service_fork(svc_t *svc)
 {
 	const char *cgnm;
@@ -608,6 +722,7 @@ static pid_t service_fork(svc_t *svc)
 			return -1;
 		}
 #endif
+		service_mkdirs(svc, uid, gid);
 		if (svc_is_tty(svc))
 			setprocnm("getty");
 
@@ -661,6 +776,8 @@ static pid_t service_fork(svc_t *svc)
 			if (setgid(gid))
 				err(1, "%s: failed setgid(%d)", svc_ident(svc, NULL, 0), gid);
 		}
+
+		service_dir_env(svc);
 
 		if (uid >= 0) {
 			set_uid(uid, svc);
@@ -1074,7 +1191,7 @@ static void service_kill(svc_t *svc)
  * Called by service_stop() and service_reload() when alternate mechanisms
  * for stopping and reloading have been specified by the user.
  */
-static int service_run_script(svc_t *svc, char *script)
+static int service_run_script(svc_t *svc, char *script, int tmo)
 {
 	const char *id = svc_ident(svc, NULL, 0);
 	pid_t pid = service_fork(svc);
@@ -1104,7 +1221,7 @@ static int service_run_script(svc_t *svc, char *script)
 	}
 
 	dbg("%s: script '%s' started as PID %d", id, script, pid);
-	return service_script_add(svc, pid, svc->killdelay);
+	return service_script_add(svc, pid, tmo ? tmo : svc->killdelay);
 }
 
 /* Ensure we don't have any notify socket lingering */
@@ -1266,7 +1383,7 @@ int service_stop(svc_t *svc)
 		print_desc("Stopping ", svc->desc);
 
 	if (svc->stop_script[0]) {
-		rc = service_run_script(svc, svc->stop_script);
+		rc = service_run_script(svc, svc->stop_script, svc->stop_tmo);
 	} else if (!svc_is_sysv(svc)) {
 		if (svc->pid > 1) {
 			/*
@@ -1358,7 +1475,7 @@ static int service_reload(svc_t *svc)
 
 	if (svc->reload_script[0]) {
 		logit(LOG_CONSOLE | LOG_NOTICE, "Reloading %s[%d], calling reload:%s ...", id, svc->pid, svc->reload_script);
-		rc = service_run_script(svc, svc->reload_script);
+		rc = service_run_script(svc, svc->reload_script, svc->reload_tmo);
 	} else 	if (svc->sighup) {
 		if (svc->pid <= 1) {
 			dbg("%s[%d]: bad PID, cannot reload service", id, svc->pid);
@@ -1535,11 +1652,26 @@ static void parse_caps(svc_t *svc, char *caps)
 		return;
 	}
 
+	if (!strcmp(svc->username, "root")) {
+		cap_value_t cap;
+
+		for (cap = 0; cap <= CAP_LAST_CAP; cap++) {
+			if (!cap_iab_get_vector(cap_iab, CAP_IAB_AMB, cap))
+				continue;
+
+			/* the ambient set only reaches effective when euid != 0 */
+			logit(LOG_WARNING, "%s: ambient capabilities ('^') have no effect"
+			      " as root, use a non-root user, or '%%' and '!' entries",
+			      svc_ident(svc, NULL, 0));
+			break;
+		}
+	}
+
 	cap_free(cap_iab);
 	strlcpy(svc->capabilities, caps, sizeof(svc->capabilities));
 #else
-	(void)svc;
-	(void)caps;
+	logit(LOG_WARNING, "%s: capabilities require Finit built with --enable-libcap,"
+	      " ignoring '%s'", svc_ident(svc, NULL, 0), caps);
 #endif
 }
 
@@ -1654,7 +1786,8 @@ static void parse_script(svc_t *svc, char *type, char *script, int *tmo, char *b
 			     script, errstr);
 			goto err;
 		}
-		*tmo = (int)(sec * 1000);
+		if (tmo)
+			*tmo = (int)(sec * 1000);
 	} else {
 		path = script;
 		if (tmo)
@@ -1857,9 +1990,11 @@ static void parse_cmdline_args(svc_t *svc, char *cmd, char **args)
  * defaults to "" (empty string).
  *
  * Returns:
- * POSIX OK(0) on success, or non-zero errno exit status on failure.
+ * The registered svc, or %NULL with @errno set on failure.  A block
+ * skipped on purpose -- conditional loading, bootstrap over, nowarn --
+ * also returns %NULL, with @errno zero.
  */
-int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
+svc_t *service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 {
 	char *cmd, *desc, *runlevels = NULL, *cond = NULL;
 	char *username = NULL, *log = NULL, *pid = NULL;
@@ -1887,12 +2022,15 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 	if (!cfg) {
 		errx(1, "Invalid input argument");
-		return errno = EINVAL;
+		errno = EINVAL;
+		return NULL;
 	}
 
 	line = strdupa(cfg);
-	if (!line)
-		return 1;
+	if (!line) {
+		errno = ENOMEM;
+		return NULL;
+	}
 
 	desc = strstr(line, "-- ");
 	if (desc) {
@@ -1917,7 +2055,8 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 	if (!cmd) {
 	incomplete:
 		errx(1, "Incomplete service '%s', cannot register", cfg);
-		return errno = ENOENT;
+		errno = ENOENT;
+		return NULL;
 	}
 
 	while (cmd) {
@@ -2017,14 +2156,17 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		strlcat(ident, id, sizeof(ident));
 	}
 
-	if (ifstmt && !svc_ifthen(1, ident, ifstmt, nowarn))
-		return 0;
+	if (ifstmt && !svc_ifthen(1, ident, ifstmt, nowarn)) {
+		errno = 0;
+		return NULL;
+	}
 
 	levels = conf_parse_runlevels(runlevels);
 	if (runlevel != INIT_LEVEL && !ISOTHER(levels, INIT_LEVEL)) {
 		dbg("Skipping %s%s%s, bootstrap is completed.",
 		    name, id[0] ? ":" : "", id[0] ? id : "");
-		return 0;
+		errno = 0;
+		return NULL;
 	}
 
 	if (type == SVC_TYPE_TTY) {
@@ -2032,7 +2174,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		char *ptr;
 
 		if (tty_parse_args(&tty, cmd, &args))
-			return errno;
+			return NULL;
 
 		/* NOTE: this may result in dev == NULL! */
 		if (tty_isatcon(tty.dev))
@@ -2051,7 +2193,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 		line = alloca(len);
 		if (!line)
-			return errno;
+			return NULL;
 
 		snprintf(line, len, "%s", tty.cmd ? tty.cmd : "tty");
 		for (i = 0; i < tty.num; i++) {
@@ -2061,7 +2203,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 
 		cmd = strtok_r(line, " \t", &args);
 		if (!cmd)
-			return errno;
+			return NULL;
 
 		/* tty's always respawn, never incr. restart_cnt */
 		respawn = 1;
@@ -2086,11 +2228,13 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		svc = svc_find(name, id);
 
 	if (!whichp(cmd)) {
-		if (nowarn)
-			return 0;
+		if (nowarn) {
+			errno = 0;
+			return NULL;
+		}
 
 		warn("%s: skipping %s", file ? file : "static", cmd);
-		return errno;
+		return NULL;
 	}
 
 	if (!svc) {
@@ -2098,7 +2242,8 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		svc = svc_new(cmd, name, id, type);
 		if (!svc) {
 			errx(1, "Out of memory, cannot register service %s", cmd);
-			return errno = ENOMEM;
+			errno = ENOMEM;
+			return NULL;
 		}
 
 		if (manual)
@@ -2208,12 +2353,12 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		memset(svc->cleanup_script, 0, sizeof(svc->cleanup_script));
 
 	if (reload_script)
-		parse_script(svc, "reload", reload_script, NULL, svc->reload_script, sizeof(svc->reload_script));
+		parse_script(svc, "reload", reload_script, &svc->reload_tmo, svc->reload_script, sizeof(svc->reload_script));
 	else
 		memset(svc->reload_script, 0, sizeof(svc->reload_script));
 
 	if (stop_script)
-		parse_script(svc, "stop", stop_script, NULL, svc->stop_script, sizeof(svc->stop_script));
+		parse_script(svc, "stop", stop_script, &svc->stop_tmo, svc->stop_script, sizeof(svc->stop_script));
 	else
 		memset(svc->stop_script, 0, sizeof(svc->stop_script));
 
@@ -2241,6 +2386,13 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		parse_caps(svc, caps);
 	else
 		memset(svc->capabilities, 0, sizeof(svc->capabilities));
+
+	/* block format only, set by conf.c after registration */
+	for (int i = 0; i < NUM_SVCDIRS; i++) {
+		memset((char *)svc + svcdirs[i].off, 0, MAX_ARG_LEN);
+		svc->dir_mode[i] = 0755;
+	}
+	svc->dir_preserve = SVC_DIR_PRESERVE_NO;
 
 	if (!svc_is_tty(svc) && ctty) {
 		char *dev = ctty;
@@ -2357,7 +2509,7 @@ int service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		}
 	}
 
-	return 0;
+	return svc;
 }
 
 /*
@@ -2863,6 +3015,16 @@ static void svc_set_state(svc_t *svc, svc_state_t new_state)
 	if (svc->state == new_state)
 		return;
 	*state = new_state;
+
+	/*
+	 * The unit has stopped: HALTED comes after any post:/cleanup:
+	 * script, DONE is a completed run/task, where remain-after-exit
+	 * keeps it alive until stopped for real.  Same removal rules as
+	 * systemd RuntimeDirectory with RuntimeDirectoryPreserve=no.
+	 */
+	if (new_state == SVC_HALTED_STATE ||
+	    (new_state == SVC_DONE_STATE && !svc_is_remain(svc)))
+		service_rmdirs(svc);
 
 	if (svc_is_runtask(svc)) {
 		char success[MAX_COND_LEN], failure[MAX_COND_LEN];
