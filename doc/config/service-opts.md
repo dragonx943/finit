@@ -61,6 +61,58 @@ Other run/task/service settings are:
   * a leading `-` on `command` -- see
     [Conditional Loading](services.md#conditional-loading)
 
+Command Candidates
+------------------
+
+The `command` setting may list several candidates for the same
+service, in which case Finit starts the first one it finds:
+
+    service udevd {
+        command = { "/lib/systemd/systemd-udevd", "-udevd" }
+    }
+
+A candidate that is not installed is skipped without a warning, that
+is the point of listing more than one.  The leading `-` is read from
+the candidate that wins, or from the last one when none are found, so
+a block with a single command behaves as it always has.
+
+The candidates are alternative spellings of one service, not a
+fallback for a service that fails to start.  Finit chooses when the
+.conf file is read and does not revisit the choice.
+
+A [`tty`](tty.md) block takes the same list, where the candidates are
+the getty to run:
+
+    tty ttyAMA0 {
+        command = { "/sbin/agetty -L ttyAMA0 115200 vt100",
+                    "/sbin/getty -L 115200 /dev/ttyAMA0 vt100" }
+    }
+
+Duplicate Titles
+----------------
+
+The title is the service identity, so two blocks sharing a title in
+one file are two declarations of one service.  The parser underneath
+merges them without a word, leaving a single service holding a mix of
+both, so Finit rejects the file and names the title:
+
+    /etc/finit.d/hotplug.conf:12: found duplicate title 'udevd'
+
+Nothing from a rejected file is loaded and the rest of the
+configuration is unaffected.
+
+The same title in *another* file is fine.  That is how a system .conf
+is overridden, the later file wins, see [Files & Layout](files.md).
+
+Two shapes need a single identity and used to be written as repeated
+declarations.  One is a service with several candidate binaries, which
+is now a [command list](#command-candidates).  The other is a service
+gated differently per platform, e.g. a syslog daemon waiting for
+whichever hotplug daemon the system happens to have.  For that one,
+give each variant its own file, or keep them as one-liners in the
+line-based format, which has no titles.  The [migration
+guide](migration.md) works through it.
+
 Restarting
 ----------
 

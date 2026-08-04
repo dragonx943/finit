@@ -226,23 +226,26 @@ Finit supports conditional loading of blocks.  The following example is
 taken from the `system/10-hotplug.conf` file in the Finit distribution.
 Here we only show a simplified subset.
 
-Starting with the leading `-` on `command`.
+Starting with the udev daemon, which goes by two names depending on
+how it was built.  Both are candidates for the same service:
 
     service udevd {
         pidfile = "udevd"
-        command = "-/lib/systemd/systemd-udevd"
-    }
-
-    service udevd {
-        pidfile = "udevd"
-        command = "-udevd"
+        command = { "/lib/systemd/systemd-udevd", "-udevd" }
     }
 
 When loading the .conf file Finit looks for
-`/lib/systemd/systemd-udevd`, and if that is not found it logs a
-warning.  The leading `-` says a missing binary is expected here, so
-the block is skipped quietly and the second one can be evaluated,
-which also provides a service named `udevd`.
+`/lib/systemd/systemd-udevd`, and if that is not there it moves on to
+`udevd`.  A candidate that is not installed is expected, so no warning
+is logged for the ones that are skipped.  The leading `-` on the last
+one says it is also fine if none of them are found, in which case the
+block is dropped quietly and no service named `udevd` exists.
+
+> [!NOTE]
+> This needs to be one block.  The title is the service identity, so
+> two blocks titled `udevd` in the same file are two declarations of
+> one service, which Finit rejects.  See [Duplicate
+> titles](service-opts.md#duplicate-titles).
 
     run udevadm:1 {
         runlevel   = "S"

@@ -2,10 +2,11 @@ Building Finit
 ==============
 
 Finit comes with a traditional configure script to control features and
-optional plugins to enable.  It depends on two external libraries:
+optional plugins to enable.  It depends on three external libraries:
 
 - [libuEv][], the event loop
 - [libite][] (-lite), much needed frog DNA
+- [libConfuse][], the parser behind the .conf format
 
 > [!IMPORTANT]
 > Most free/open source software packages that use `configure` default
@@ -22,6 +23,7 @@ version of the above mentioned libraries.  Currently required versions:
 
 - libite v2.2.0, or later
 - libuEv v2.2.0, or later
+- libConfuse v3.3, or later
 
 
 Configure
@@ -193,3 +195,4 @@ it only for debugging start up issues when Finit crashes.
 [1]:       https://github.com/finit-project/finit/releases/download/4.3/finit-4.3.tar.gz
 [libuEv]:  https://github.com/troglobit/libuev
 [libite]:  https://github.com/troglobit/libite
+[libConfuse]: https://github.com/libconfuse/libconfuse

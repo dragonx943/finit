@@ -82,6 +82,63 @@ Service options
 | `nowarn`                         | leading `-` on `command` or `envfile`            |
 | `restarttmo:`                    | dropped, was already an alias for `restart_sec:` |
 
+Repeated stanzas
+----------------
+
+The line-based format has no titles, so the same service could be
+declared more than once and Finit would sort out which line applied.
+A block title *is* the identity, and two blocks sharing one in the
+same file are rejected.  The two shapes that relied on the repetition
+convert differently.
+
+**Several candidate binaries for one service.**  The daemon is known
+under more than one name and the stanzas were repeated once per name,
+each with `nowarn` so the ones that were not installed were skipped:
+
+    service nowarn pid:!/run/udevd.pid [S12345789] /lib/systemd/systemd-udevd -- Device event daemon
+    service nowarn pid:!/run/udevd.pid [S12345789] udevd -- Device event daemon
+
+The candidates now go in one block, and Finit starts the first one it
+finds:
+
+    service udevd {
+        description = "Device event daemon"
+        runlevel    = "S12345789"
+        pidfile     = "/run/udevd.pid"
+        command     = { "/lib/systemd/systemd-udevd", "-udevd" }
+    }
+
+**One service gated differently per platform.**  The command is the
+same every time, only `if:` and the conditions differ, e.g. a syslog
+daemon that has to wait for whichever hotplug daemon the system has:
+
+    service if:udevd nowarn env:-/etc/default/sysklogd <run/udevadm:5/success> \
+           [S0123456789] syslogd -F $SYSLOGD_ARGS -- System log daemon
+    service if:mdev  nowarn env:-/etc/default/sysklogd <run/coldplug/success> \
+           [S0123456789] syslogd -F $SYSLOGD_ARGS -- System log daemon
+
+All of these are one service, `syslogd`, providing one `pid/syslogd`
+barrier for everything downstream, so they cannot be given separate
+titles without renaming that barrier.  There are two ways to keep the
+identity:
+
+  * put each variant in its own .conf file, since the ban on duplicate
+    titles is per file, or
+  * leave this one file in the line-based format, which Finit still
+    reads.  Format is detected per file, so the rest of the system can
+    be block format.
+
+A single variant converts the way anything else does:
+
+    service syslogd {
+        description = "System log daemon"
+        runlevel    = "S0123456789"
+        if          = "udevd"
+        conditions  = { "run/udevadm:5/success" }
+        envfile     = "-/etc/default/sysklogd"
+        command     = "-syslogd -F $SYSLOGD_ARGS"
+    }
+
 Cgroups
 -------
 
@@ -170,8 +227,11 @@ Worth knowing
     exactly like its legacy counterpart.
   * A list cannot hold comments; the lexer reads entries after a `#`
     regardless.  Put commented-out candidates above the list.
-  * `$VAR` in a value is expanded when the file is read, against
-    Finit's environment.  An unset variable expands to nothing.
+  * `${VAR}` in a value is expanded when the file is read, against
+    Finit's environment, and `${VAR:-default}` works too.  An unset
+    variable expands to nothing.  A plain `$VAR` is left alone and
+    reaches the service, which is what keeps `command = "syslogd -F
+    $SYSLOGD_ARGS"` working with an `envfile`.
   * New settings only appear in the block format.  The first are the
     [per-service directories](service-opts.md#service-directories),
     `runtime-dir` and friends.

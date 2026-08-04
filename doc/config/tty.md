@@ -11,6 +11,10 @@ may be the special keyword `@console`, expanded from
 `/sys/class/tty/console/active`, useful on embedded systems.  `command`
 hands the TTY to an external getty.  `notty` opens nothing at all.
 
+`command` may name several candidates, `{ "agetty ...", "getty ..." }`,
+and Finit runs the first one it finds.  See [Command
+Candidates](service-opts.md#command-candidates).
+
 Settings common to all three:
 
 | Setting | Alias | Description |

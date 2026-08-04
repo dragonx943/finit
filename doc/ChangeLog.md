@@ -8,6 +8,10 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- The `command` setting in a block takes a list of candidates for the
+  same service, `command = { "/lib/systemd/systemd-udevd", "-udevd" }`,
+  and Finit starts the first one it finds.  The line-based format could
+  only express this by repeating the whole stanza per candidate
 - Restart log now spells out the signal name and flags core dumps,
   e.g. `killed by SIGKILL` or `killed by SIGSEGV, core dumped`, in
   place of the bare numeric `by signal: N`.  Gives operators a much
@@ -15,6 +19,13 @@ All relevant changes are documented in this file.
 
 ### Fixes
 
+- Reject a .conf file that declares the same block title twice.  The
+  title is the service identity and libConfuse merges two sections
+  sharing one, so the file loaded as a single service holding a mix of
+  both declarations, silently.  This hit `system/10-hotplug.conf`,
+  where the two `udevd` blocks left only the second command, dropping
+  the service on systems that only have `systemd-udevd`.  The same
+  title in another file is still how a system .conf is overridden
 - Remove stale daemon-owned (`pid:!`) pidfiles after unclean exits.
   When a daemon dies via SIGKILL/OOM/segfault, or exits early during
   startup, its pidfile lingers and can prevent the next instance from
