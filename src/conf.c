@@ -55,6 +55,7 @@
 # include <lite/queue.h>	/* BSD sys/queue.h API */
 #endif
 #include <confuse.h>
+#include <signal.h>
 #include <time.h>
 #include <glob.h>
 
