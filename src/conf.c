@@ -313,12 +313,21 @@ static cfg_opt_t tty_opts[] = {
 	CFG_END()
 };
 
+/*
+ * Flags for the sections whose title is a service identity.
+ * libconfuse merges two sections sharing a title, silently, which for
+ * these would fold two declarations into one service, so duplicates
+ * are rejected instead.
+ */
+#define SVC_SEC_FLAGS (CFGF_MULTI | CFGF_TITLE | CFGF_NO_TITLE_DUPES)
+
 static cfg_opt_t conf_opts[] = {
-	CFG_SEC     ("service", svc_opts,    CFGF_MULTI | CFGF_TITLE),
-	CFG_SEC     ("task",    svc_opts,    CFGF_MULTI | CFGF_TITLE),
-	CFG_SEC     ("run",     svc_opts,    CFGF_MULTI | CFGF_TITLE),
-	CFG_SEC     ("sysv",    svc_opts,    CFGF_MULTI | CFGF_TITLE),
-	CFG_SEC     ("tty",     tty_opts,    CFGF_MULTI | CFGF_TITLE),
+	CFG_SEC     ("service", svc_opts,    SVC_SEC_FLAGS),
+	CFG_SEC     ("task",    svc_opts,    SVC_SEC_FLAGS),
+	CFG_SEC     ("run",     svc_opts,    SVC_SEC_FLAGS),
+	CFG_SEC     ("sysv",    svc_opts,    SVC_SEC_FLAGS),
+	CFG_SEC     ("tty",     tty_opts,    SVC_SEC_FLAGS),
+	/* cgroup titles name a group, not a service, so merging is fine */
 	CFG_SEC     ("cgroup",  cgroup_opts, CFGF_MULTI | CFGF_TITLE | CFGF_KEYSTRVAL),
 	CFG_SEC     ("rlimit",  rlimit_opts, CFGF_NONE),
 	CFG_SEC     ("environment", env_opts, CFGF_KEYSTRVAL),
@@ -2003,6 +2012,7 @@ static int conf_parse_any(cfg_t *cfg, char *file, char *buf)
  */
 static int is_new_format(char *file, char *buf)
 {
+	cfg_opt_t *opt;
 	cfg_t *cfg;
 	int rc;
 
@@ -2011,6 +2021,17 @@ static int is_new_format(char *file, char *buf)
 		return 0;
 
 	cfg_set_error_function(cfg, cfg_error_quiet);
+
+	/*
+	 * The verdict must stay syntactic.  A duplicate section title is
+	 * a semantic error in a file that is unmistakably block format,
+	 * and answering 'no' here would hand it to the legacy parser,
+	 * burying the real message under its errors.  cfg_init() copies
+	 * the option array, so this only relaxes the probe.
+	 */
+	for (opt = cfg->opts; opt && opt->name; opt++)
+		opt->flags &= ~CFGF_NO_TITLE_DUPES;
+
 	rc = conf_parse_any(cfg, file, buf);
 	cfg_free(cfg);
 
