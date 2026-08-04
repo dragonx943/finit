@@ -13,21 +13,25 @@
 #        command     = "syslogd -F"
 #    }
 #
-# with `if = "mdev"` or `if = "mdevd"` and the matching coldplug condition
-# for those variants.
-#
-# This provdes a <pid/syslogd> condition that can act as a barrier for all
+# This provides a pid/syslogd condition that can act as a barrier for all
 # other services.  Notice the `if` setting: the condition for starting
 # syslogd is only considered if either udevd or mdev (service) is loaded and
 # is guaranteed to run after each respective run stanza have completed.
 #
+# The mdev and mdevd systems wait for a different coldplug condition, so they
+# need their own block, and a block title is a service identity: two blocks
+# titled syslogd in one file are two declarations of one service, which Finit
+# rejects.  Give each variant its own file, or keep them as one-liners in the
+# line-based format, which has no titles and allows the repetition.  See
+# doc/config/migration.md for both.
+#
 # Override this file by copying it to /etc/finit.d/, using the same name, then
 # change the contents any way you like, it can even be empty.
-#
-# The leading '-' on every command says a missing binary is expected here, so
-# the block is skipped quietly and the next candidate gets its turn.
 
 # Check for systemd-udevd and eudev, if we find both, we opt for the latter.
+# Both spellings are candidates for the same service, Finit starts the first
+# one it finds.  A leading '-' on the last says it is fine if neither is
+# installed, we fall through to mdevd or mdev below.
 service udevd {
 	description    = "Device event daemon (udev)"
 	runlevel       = "S12345789"
@@ -37,18 +41,8 @@ service udevd {
 	pidfile-create = true
 	log { }
 	cgroup system { name = "udevd" }
-	command        = "-/lib/systemd/systemd-udevd $UDEVD_ARGS"
-}
-service udevd {
-	description    = "Device event daemon (udev)"
-	runlevel       = "S12345789"
-	notify         = "none"
-	envfile        = "-/etc/default/udevd"
-	pidfile        = "udevd"
-	pidfile-create = true
-	log { }
-	cgroup system { name = "udevd" }
-	command        = "-udevd $UDEVD_ARGS"
+	command        = { "/lib/systemd/systemd-udevd $UDEVD_ARGS",
+			   "-udevd $UDEVD_ARGS" }
 }
 
 # Wait for udevd to start, then trigger coldplug events and module loading.

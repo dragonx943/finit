@@ -232,7 +232,12 @@ static cfg_opt_t log_opts[] = {
 static cfg_opt_t svc_opts[] = {
 	CFG_STR     ("description",  NULL, CFGF_NODEFAULT),
 	CFG_STR     ("desc",         NULL, CFGF_NODEFAULT),	/* alias */
-	CFG_STR     ("command",      NULL, CFGF_NODEFAULT),
+	/*
+	 * A list, but libconfuse takes a bare string for one as well, so
+	 * the common `command = "prog args"` is unaffected.  See
+	 * svc_command().
+	 */
+	CFG_STR_LIST("command",      NULL, CFGF_NODEFAULT),
 	CFG_STR     ("runlevel",     NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("conditions",   NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("cond",         NULL, CFGF_NODEFAULT),	/* alias */
@@ -307,7 +312,7 @@ static cfg_opt_t tty_opts[] = {
 	CFG_BOOL    ("noclear",   cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("nowait",    cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("nologin",   cfg_false, CFGF_NODEFAULT),
-	CFG_STR     ("command",   NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("command",   NULL, CFGF_NODEFAULT),	/* candidates, see svc_command() */
 	CFG_BOOL    ("notty",     cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("rescue",    cfg_false, CFGF_NODEFAULT),
 	CFG_END()
@@ -1106,6 +1111,46 @@ static int sec_getbool(cfg_t *sec, const char *key, const char *alias)
 }
 
 /*
+ * Pick the command for a service.  Several may be listed, in which
+ * case they are candidates for the same service and the first one
+ * whose binary resolves wins:
+ *
+ *     command = { "/lib/systemd/systemd-udevd", "udevd" }
+ *
+ * The line-based format could only spell this as one stanza per
+ * candidate, relying on nowarn to skip the ones that were not
+ * installed.  A candidate not being there is not an error here, so
+ * only the winner is looked up again by service_register().
+ *
+ * A leading '-' still says a missing binary is expected, cf. systemd
+ * ExecStart=-.
+ *
+ * Returns NULL when the section has no command at all, which is an
+ * error for a service but not for a tty, so the caller decides.
+ */
+static const char *svc_command(cfg_t *sec, int *nowarn)
+{
+	const char *cand = NULL;
+	unsigned int i, num;
+
+	num = cfg_size(sec, "command");
+	if (!num)
+		return NULL;
+
+	for (i = 0; i < num; i++) {
+		cand = cfg_getnstr(sec, "command", i);
+		*nowarn = cand[0] == '-';
+
+		/* which() skips any arguments to the command */
+		if (whichp(&cand[*nowarn]))
+			break;
+	}
+
+	/* the winner, or the last candidate when none of them resolve */
+	return &cand[*nowarn];
+}
+
+/*
  * Append token to the one-liner being built, space separated.
  */
 static void addtok(char *line, size_t len, const char *fmt, ...)
@@ -1399,17 +1444,12 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 	svc_t *svc;
 	char *id;
 
-	cmd = sec_getstr(sec, "command", NULL);
+	cmd = svc_command(sec, &nowarn);
 	if (!cmd) {
 		logit(LOG_ERR, "%s: section '%s' missing command, skipping",
 		      file, cfg_title(sec));
 		return;
 	}
-
-	/* a leading - tolerates a missing binary, cf. systemd ExecStart=- */
-	nowarn = cmd[0] == '-';
-	if (nowarn)
-		cmd++;
 
 	if ((str = sec_getstr(sec, "runlevel", NULL)))
 		addtok(line, sizeof(line), "[%s]", str);
@@ -1614,6 +1654,7 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 {
 	char line[LINE_SIZE] = "";
 	const char *str, *dev, *cmd;
+	int nowarn = 0;
 	char buf[512];
 
 	if ((str = sec_getstr(sec, "runlevel", NULL)))
@@ -1623,11 +1664,9 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 		addtok(line, sizeof(line), "<%s>", buf);
 
 	dev = sec_getstr(sec, "device", NULL);
-	cmd = sec_getstr(sec, "command", NULL);
-	if (cmd && cmd[0] == '-') {
+	cmd = svc_command(sec, &nowarn);
+	if (nowarn)
 		addtok(line, sizeof(line), "nowarn");
-		cmd++;
-	}
 
 	if (dev) {
 		addtok(line, sizeof(line), "%s", dev);
