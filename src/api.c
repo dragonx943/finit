@@ -112,8 +112,6 @@ static int restart(svc_t *svc, void *user_data)
 
 static int reload(svc_t *svc, void *user_data)
 {
-	char cond[MAX_COND_LEN];
-
 	(void)user_data;
 
 	if (!svc)
@@ -138,7 +136,7 @@ static int reload(svc_t *svc, void *user_data)
 	 * mechanism which may not re-trigger on SIGHUP.
 	 */
 	if (svc_is_noreload(svc)) {
-		cond_clear(mkcond(svc, cond, sizeof(cond)));
+		svc_cond_clear(svc);
 		if (svc->notify == SVC_NOTIFY_PID || svc->notify == SVC_NOTIFY_NONE)
 			service_ready(svc, 0);
 	}

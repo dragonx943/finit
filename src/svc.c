@@ -57,27 +57,24 @@ static TAILQ_HEAD(, svc) gc_list  = TAILQ_HEAD_INITIALIZER(gc_list);
 static void maybe_clear_cond(svc_t *svc)
 {
 	char ident[MAX_IDENT_LEN];
-	char cond[MAX_COND_LEN];
-	svc_t *iter = NULL;
-	svc_t *s;
+	char buf[MAX_COND_LEN];
+	const char *cond;
+	int i = 0;
 
-	mkcond(svc, cond, sizeof(cond));
 	svc_ident(svc, ident, sizeof(ident));
 
-	for (s = svc_iterator(&iter, 1); s; s = svc_iterator(&iter, 0)) {
-		char c[MAX_COND_LEN];
+	while ((cond = svc_cond_nth(svc, i++, buf, sizeof(buf)))) {
+		svc_t *owner = svc_cond_owner(cond, svc);
 
-		mkcond(s, c, sizeof(c));
-		if (!string_compare(cond, c))
+		if (owner) {
+			dbg("Not clearing cond %s from gc svc %s, provided by new active service %s",
+			   cond, ident, svc_ident(owner, NULL, 0));
 			continue;
+		}
 
-		dbg("Not clearing cond %s from gc svc %s, provided by new active service %s",
-		   cond, ident, svc_ident(s, NULL, 0));
-		return;
+		dbg("Cleaning out %s, clearing cond %s ...", ident, cond);
+		cond_clear(cond);
 	}
-
-	dbg("Cleaning out %s, clearing any conditions ...", svc->name);
-	cond_clear(mkcond(svc, cond, sizeof(cond)));
 }
 
 static void svc_gc(void *arg)
@@ -459,25 +456,92 @@ svc_t *svc_find_by_pid(pid_t pid)
 }
 
 /**
- * svc_find_by_cond - Find a service object by its pid/foo condition
- * @cond: Full "pid/foo" condition
+ * svc_cond_nth - Walk the conditions a service owns
+ * @svc: Service object
+ * @i:   0 for the service's own pid/<ident>, 1.. for provided ones
+ * @buf: Scratch for the own condition, unused for the rest
+ * @len: Size of @buf
+ *
+ * Returns:
+ * The @i'th condition, or %NULL when @i is past the last one.
+ */
+const char *svc_cond_nth(svc_t *svc, int i, char *buf, size_t len)
+{
+	if (!svc || i < 0)
+		return NULL;
+	if (i == 0)
+		return mkcond(svc, buf, len);
+	if (i > svc->num_provides)
+		return NULL;
+
+	return svc->provides[i - 1];
+}
+
+/**
+ * svc_cond_owner - Find the service that owns a condition
+ * @cond: Full condition, e.g. "pid/syslogd"
+ * @skip: Service to leave out of the search, or %NULL
+ *
+ * A service's own pid/<ident> outranks one it merely provides, that is
+ * how Finit tracks the service itself, so every identity is checked
+ * before any provides.
+ *
+ * Returns:
+ * A pointer to an &svc_t object, or %NULL if nobody owns @cond.
+ */
+svc_t *svc_cond_owner(const char *cond, svc_t *skip)
+{
+	svc_t *svc, *iter = NULL;
+	int i;
+
+	if (!cond || !cond[0])
+		return NULL;
+
+	for (svc = svc_iterator(&iter, 1); svc; svc = svc_iterator(&iter, 0)) {
+		char buf[MAX_COND_LEN];
+
+		if (svc == skip)
+			continue;
+		if (string_compare(mkcond(svc, buf, sizeof(buf)), cond))
+			return svc;
+	}
+
+	iter = NULL;
+	for (svc = svc_iterator(&iter, 1); svc; svc = svc_iterator(&iter, 0)) {
+		if (svc == skip)
+			continue;
+		for (i = 0; i < svc->num_provides; i++) {
+			if (string_compare(svc->provides[i], cond))
+				return svc;
+		}
+	}
+
+	return NULL;
+}
+
+/**
+ * svc_find_by_cond - Find a service object by a condition it owns
+ * @cond: Full condition, e.g. "pid/syslogd"
  *
  * Returns:
  * A pointer to an &svc_t object, or %NULL if not found.
  */
 svc_t *svc_find_by_cond(const char *cond)
 {
+	return svc_cond_owner(cond, NULL);
+}
+
+/*
+ * Provides are re-read from the .conf files on every reload, and a
+ * service re-registering must not lose to a claim another service has
+ * not dropped yet, so they all go at once before parsing starts.
+ */
+void svc_provides_reset(void)
+{
 	svc_t *svc, *iter = NULL;
 
-	for (svc = svc_iterator(&iter, 1); svc; svc = svc_iterator(&iter, 0)) {
-		char buf[MAX_COND_LEN];
-
-		mkcond(svc, buf, sizeof(buf));
-		if (string_compare(buf, cond))
-			return svc;
-	}
-
-	return NULL;
+	for (svc = svc_iterator(&iter, 1); svc; svc = svc_iterator(&iter, 0))
+		svc->num_provides = 0;
 }
 
 /**

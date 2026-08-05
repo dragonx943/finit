@@ -102,6 +102,7 @@ typedef enum {
 #define MAX_COND_LEN     (MAX_ARG_LEN * 3)
 #define MAX_USER_LEN     16
 #define MAX_NUM_SUPGROUPS 4
+#define MAX_NUM_PROVIDES 4
 #define MAX_NUM_FDS      64	     /* Max number of I/O plugins */
 #define MAX_NUM_SVC_ARGS 64
 
@@ -150,6 +151,10 @@ typedef struct svc {
 	int	       forking;	       /* This is a service/sysv daemon that forks, wait for it ... */
 	svc_block_t    block;	       /* Reason that this service is currently stopped */
 	char           cond[MAX_COND_LEN];
+
+	/* Conditions this service asserts on top of its own pid/<ident> */
+	char           provides[MAX_NUM_PROVIDES][MAX_COND_LEN];
+	int            num_provides;
 
 	/* Instance specifics */
 	int            job;	       /* For internal use only, canonical ref is NAME:ID */
@@ -266,6 +271,9 @@ svc_t	   *svc_find	           (char *name, char *id);
 svc_t	   *svc_find_by_str        (const char *str);
 svc_t	   *svc_find_by_pid        (pid_t pid);
 svc_t	   *svc_find_by_cond	   (const char *cond);
+svc_t	   *svc_cond_owner	   (const char *cond, svc_t *skip);
+const char *svc_cond_nth	   (svc_t *svc, int i, char *buf, size_t len);
+void	    svc_provides_reset	   (void);
 svc_t	   *svc_find_by_jobid      (int job, char *id);
 svc_t	   *svc_find_by_tty        (char *dev);
 svc_t      *svc_find_by_pidfile    (char *fn);

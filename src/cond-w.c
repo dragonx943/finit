@@ -145,6 +145,31 @@ char *mkcond(svc_t *svc, char *buf, size_t len)
 	return buf;
 }
 
+/*
+ * Assert or clear every condition a service owns: its own pid/<ident>
+ * and anything it declares with provides.  Each site that owns a
+ * service's conditions goes through these, so the two cannot drift.
+ */
+void svc_cond_set(svc_t *svc)
+{
+	char buf[MAX_COND_LEN];
+	const char *cond;
+	int i = 0;
+
+	while ((cond = svc_cond_nth(svc, i++, buf, sizeof(buf))))
+		cond_set(cond);
+}
+
+void svc_cond_clear(svc_t *svc)
+{
+	char buf[MAX_COND_LEN];
+	const char *cond;
+	int i = 0;
+
+	while ((cond = svc_cond_nth(svc, i++, buf, sizeof(buf))))
+		cond_clear(cond);
+}
+
 static int cond_set_gen(const char *file, unsigned int gen)
 {
 	char *ptr, path[256];

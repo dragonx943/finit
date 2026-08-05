@@ -1271,8 +1271,6 @@ static void service_clean_pidfile(svc_t *svc, pid_t reaped)
  */
 static void service_cleanup(svc_t *svc)
 {
-	char cond[MAX_COND_LEN];
-
 	/* PID collected, cancel any pending SIGKILL */
 	service_timeout_cancel(svc);
 
@@ -1297,7 +1295,7 @@ static void service_cleanup(svc_t *svc)
 	 * RUNNING to HALTED (skipping STOPPING where cond_clear()
 	 * is normally called).
 	 */
-	cond_clear(mkcond(svc, cond, sizeof(cond)));
+	svc_cond_clear(svc);
 
 	service_notify_stop(svc);
 
@@ -3191,13 +3189,11 @@ restart:
 
 	case SVC_STOPPING_STATE:
 		if (!svc->pid) {
-			char condstr[MAX_COND_LEN];
-
 			dbg("%s: stopped, cleaning up timers and conditions ...", svc_ident(svc, NULL, 0));
 			service_notify_stop(svc);
 
 			service_timeout_cancel(svc);
-			cond_clear(mkcond(svc, condstr, sizeof(condstr)));
+			svc_cond_clear(svc);
 
 			switch (svc->type) {
 			case SVC_TYPE_SERVICE:

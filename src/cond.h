@@ -25,6 +25,8 @@ typedef enum cond_state {
 } cond_state_t;
 
 char           *mkcond       (svc_t *svc, char *buf, size_t len);
+void            svc_cond_set (svc_t *svc);
+void            svc_cond_clear(svc_t *svc);
 const char     *condstr      (enum cond_state s);
 const char     *cond_path    (const char *name);
 unsigned int    cond_get_gen (const char *path);
