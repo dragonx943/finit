@@ -288,6 +288,7 @@ static cfg_opt_t svc_opts[] = {
 	CFG_INT     ("config-dir-mode",      0, CFGF_NODEFAULT),
 	CFG_STR     ("runtime-dir-preserve", NULL, CFGF_NODEFAULT),
 	CFG_STR_LIST("conflicts",    NULL, CFGF_NODEFAULT),
+	CFG_STR_LIST("provides",     NULL, CFGF_NODEFAULT),
 	CFG_STR     ("if",           NULL, CFGF_NODEFAULT),
 	CFG_STR     ("tty",          NULL, CFGF_NODEFAULT),
 	/*
@@ -1383,6 +1384,58 @@ static int if_translate(const char *str, char *buf, size_t len, char *file, cons
 }
 
 /*
+ * provides names conditions this service asserts on top of its own
+ * pid/<ident>, so blocks with distinct titles can supply one barrier
+ * to everything downstream.  Like the per-service directories it has
+ * no legacy token and is stored on the registered svc.
+ *
+ * A claim on a condition that is already owned is dropped, with the
+ * service itself left alone: the overlap is a configuration bug, and
+ * an init system is more useful degraded than refusing to boot.
+ */
+static void provides_translate(cfg_t *sec, svc_t *svc, char *file)
+{
+	unsigned int i, num;
+
+	num = cfg_size(sec, "provides");
+	for (i = 0; i < num; i++) {
+		const char *cond = cfg_getnstr(sec, "provides", i);
+		svc_t *owner;
+
+		if (!strchr(cond, '/')) {
+			logit(LOG_ERR, "%s: %s: provides '%s' is not a condition,"
+			      " it needs a namespace, e.g. usr/%s, ignoring",
+			      file, cfg_title(sec), cond, cond);
+			continue;
+		}
+
+		if (strlen(cond) >= MAX_COND_LEN) {
+			logit(LOG_ERR, "%s: %s: provides '%s' is too long,"
+			      " ignoring", file, cfg_title(sec), cond);
+			continue;
+		}
+
+		if (svc->num_provides >= MAX_NUM_PROVIDES) {
+			logit(LOG_WARNING, "%s: %s: too many provides, max %d,"
+			      " ignoring '%s'", file, cfg_title(sec),
+			      MAX_NUM_PROVIDES, cond);
+			break;
+		}
+
+		owner = svc_cond_owner(cond, svc);
+		if (owner) {
+			logit(LOG_WARNING, "%s: %s: provides condition <%s>"
+			      " already registered by service %s, ignoring",
+			      file, cfg_title(sec), cond,
+			      svc_ident(owner, NULL, 0));
+			continue;
+		}
+
+		strlcpy(svc->provides[svc->num_provides++], cond, MAX_COND_LEN);
+	}
+}
+
+/*
  * These have no legacy token, they are validated by service_set_dir()
  * and stored directly on the registered svc.  Empty means unset,
  * service_register() has already cleared the fields.
@@ -1644,6 +1697,7 @@ static void svc_translate(cfg_t *sec, int type, struct rlimit rlimit[], char *fi
 		return;
 
 	dirs_translate(sec, svc, file);
+	provides_translate(sec, svc, file);
 }
 
 /*
@@ -2199,6 +2253,7 @@ int conf_reload(void)
 	cgroup_mark_all();
 	svc_mark_dynamic();
 	conf_reset_env();
+	svc_provides_reset();
 
 	/*
 	 * Reset global rlimit to bootstrap values from conf_init().

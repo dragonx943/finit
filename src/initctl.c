@@ -337,6 +337,7 @@ static int dump_one_cond(const char *fpath, const struct stat *sb, int tflag, st
 	const char *cond, *asserted;
 	char *nm = "init";
 	pid_t pid = 1;
+	svc_t *svc;
 
 	if (tflag != FTW_F)
 		return 0;
@@ -350,17 +351,18 @@ static int dump_one_cond(const char *fpath, const struct stat *sb, int tflag, st
 	if (dump_filter && dump_filter[0] && strncmp(cond, dump_filter, strlen(dump_filter)))
 		return 0;
 
-	if (strncmp("pid/", cond, 4) == 0) {
-		svc_t *svc;
-
-		svc = client_svc_find_by_cond(cond);
-		if (!svc) {
-			nm  = "unknown";
-			pid = 0;
-		} else {
-			nm  = svc_ident(svc, NULL, 0);
-			pid = svc->pid;
-		}
+	/*
+	 * Any namespace can be claimed with provides, so ask who owns
+	 * the condition before falling back to what the namespace
+	 * implies on its own.
+	 */
+	svc = client_svc_find_by_cond(cond);
+	if (svc) {
+		nm  = svc_ident(svc, NULL, 0);
+		pid = svc->pid;
+	} else if (strncmp("pid/", cond, 4) == 0) {
+		nm  = "unknown";
+		pid = 0;
 	} else if (strncmp("usr/", cond, 4) == 0) {
 		nm  = "static";
 		pid = 0;

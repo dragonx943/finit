@@ -2391,6 +2391,7 @@ svc_t *service_register(int type, char *cfg, struct rlimit rlimit[], char *file)
 		svc->dir_mode[i] = 0755;
 	}
 	svc->dir_preserve = SVC_DIR_PRESERVE_NO;
+	svc->num_provides = 0;
 
 	if (!svc_is_tty(svc) && ctty) {
 		char *dev = ctty;
