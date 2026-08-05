@@ -117,27 +117,46 @@ daemon that has to wait for whichever hotplug daemon the system has:
     service if:mdev  nowarn env:-/etc/default/sysklogd <run/coldplug/success> \
            [S0123456789] syslogd -F $SYSLOGD_ARGS -- System log daemon
 
-All of these are one service, `syslogd`, providing one `pid/syslogd`
-barrier for everything downstream, so they cannot be given separate
-titles without renaming that barrier.  There are two ways to keep the
-identity:
+All of these are one service, `syslogd`, and everything downstream
+waits for the one `pid/syslogd` barrier it provides.  That barrier is
+the reason the repetition existed: the title alone spells it, so
+separate titles would rename it.
 
-  * put each variant in its own .conf file, since the ban on duplicate
-    titles is per file, or
-  * leave this one file in the line-based format, which Finit still
-    reads.  Format is detected per file, so the rest of the system can
-    be block format.
+Give each variant its own title and name the shared barrier with
+`provides`:
 
-A single variant converts the way anything else does:
-
-    service syslogd {
+    service syslogd:udev {
         description = "System log daemon"
         runlevel    = "S0123456789"
         if          = "udevd"
         conditions  = { "run/udevadm:5/success" }
+        provides    = "pid/syslogd"
         envfile     = "-/etc/default/sysklogd"
         command     = "-syslogd -F $SYSLOGD_ARGS"
     }
+    service syslogd:mdev {
+        description = "System log daemon"
+        runlevel    = "S0123456789"
+        if          = "mdev"
+        conditions  = { "run/coldplug/success" }
+        provides    = "pid/syslogd"
+        envfile     = "-/etc/default/sysklogd"
+        command     = "-syslogd -F $SYSLOGD_ARGS"
+    }
+
+Whichever variant `if` qualifies asserts `pid/syslogd` on top of its
+own `pid/syslogd:udev`, so downstream blocks need no change.  The `if`
+statements are meant to be mutually exclusive; if two of them do
+qualify, the second claim is refused with a warning and only the first
+variant supplies the barrier.  See [Provided
+Conditions](service-opts.md#provided-conditions).
+
+`initctl` now knows the variants apart, `initctl status syslogd:udev`,
+and a bare `initctl status syslogd` still lists them all.
+
+Splitting the variants across files also works, since the ban on
+duplicate titles is per file, as does leaving that one file in the
+line-based format.  Neither is needed for this shape any more.
 
 Cgroups
 -------

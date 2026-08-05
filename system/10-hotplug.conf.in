@@ -21,9 +21,21 @@
 # The mdev and mdevd systems wait for a different coldplug condition, so they
 # need their own block, and a block title is a service identity: two blocks
 # titled syslogd in one file are two declarations of one service, which Finit
-# rejects.  Give each variant its own file, or keep them as one-liners in the
-# line-based format, which has no titles and allows the repetition.  See
-# doc/config/migration.md for both.
+# rejects.  Give each variant its own title and name the shared barrier that
+# everything downstream waits for:
+#
+#    service syslogd:udev {
+#        if         = "udevd"
+#        conditions = { "run/udevadm:5/success" }
+#        provides   = "pid/syslogd"
+#        command    = "syslogd -F"
+#    }
+#    service syslogd:mdev {
+#        if         = "mdev"
+#        conditions = { "run/coldplug/success" }
+#        provides   = "pid/syslogd"
+#        command    = "syslogd -F"
+#    }
 #
 # Override this file by copying it to /etc/finit.d/, using the same name, then
 # change the contents any way you like, it can even be empty.

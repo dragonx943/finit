@@ -8,6 +8,12 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- New `provides` setting for run/task/service/sysv blocks, naming
+  conditions the service asserts in addition to its own `pid/<ident>`.
+  Lets variants of one service, qualified with `if`, share the barrier
+  condition downstream services wait for, which a block title alone
+  could not express.  Any namespace is allowed, and a second claim on
+  the same condition is refused with a warning naming the owner
 - The `command` setting in a block takes a list of candidates for the
   same service, `command = { "/lib/systemd/systemd-udevd", "-udevd" }`,
   and Finit starts the first one it finds.  The line-based format could

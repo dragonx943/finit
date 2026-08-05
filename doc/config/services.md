@@ -348,3 +348,9 @@ can be written as:
         conditions = { "pid/sysrepo" }
         command    = "confd ..."
     }
+
+Variants of one service are often qualified this way, one per platform,
+and they usually have to supply the same barrier to whatever waits for
+them.  Each variant needs its own title, since a title is an identity,
+and the shared barrier is named with `provides`.  See [Provided
+Conditions](service-opts.md#provided-conditions).

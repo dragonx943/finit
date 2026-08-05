@@ -88,6 +88,54 @@ the getty to run:
                     "/sbin/getty -L 115200 /dev/ttyAMA0 vt100" }
     }
 
+Provided Conditions
+-------------------
+
+A service always asserts `pid/<ident>` for itself, named after the
+block title.  `provides` names conditions it asserts in addition to
+that one:
+
+    service syslogd:udev {
+        if       = "udevd"
+        provides = "pid/syslogd"
+        command  = "syslogd -F"
+    }
+
+This is what lets variants of one service, picked apart by
+[`if`](services.md#conditional-execution), share the barrier that
+everything downstream waits for.  Each variant has its own title, so
+each is its own service to `initctl`, while the condition they publish
+stays the same.
+
+Any namespace works, `pid/`, `usr/`, `service/`, since the point is
+publishing a name existing configuration already waits on.  A value
+without a namespace separator is not a condition and is rejected.  The
+list holds at most four.
+
+A provided condition is asserted and cleared with the service, exactly
+like its own, so stopping the provider clears the barrier.
+
+Two services cannot supply the same condition.  The second claim is
+refused, with the owner named:
+
+    finit.conf: second: provides condition <usr/barrier> already registered by service first, ignoring
+
+The service itself still registers and runs, only the claim is
+dropped.  Which one is "first" is .conf load order, so it follows the
+file names, see [Files & Layout](files.md).
+
+A real identity outranks a claim on it.  `provides = "pid/sshd"` in a
+system that also runs a service titled `sshd` loses to that service,
+because `pid/<ident>` is how Finit tracks the service itself.
+
+`initctl cond dump` names the owner of every condition, which for a
+provided one is the service that claimed it:
+
+    $ initctl cond dump
+    PID    IDENT         STATUS  CONDITION
+    1234   syslogd:udev  on      <pid/syslogd>
+    1234   syslogd:udev  on      <pid/syslogd:udev>
+
 Duplicate Titles
 ----------------
 
