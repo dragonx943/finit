@@ -313,6 +313,7 @@ static cfg_opt_t tty_opts[] = {
 	CFG_BOOL    ("noclear",   cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("nowait",    cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("nologin",   cfg_false, CFGF_NODEFAULT),
+	CFG_BOOL    ("passenv",   cfg_false, CFGF_NODEFAULT),
 	CFG_STR_LIST("command",   NULL, CFGF_NODEFAULT),	/* candidates, see svc_command() */
 	CFG_BOOL    ("notty",     cfg_false, CFGF_NODEFAULT),
 	CFG_BOOL    ("rescue",    cfg_false, CFGF_NODEFAULT),
@@ -1747,6 +1748,20 @@ static void tty_translate(cfg_t *sec, struct rlimit rlimit[], char *file)
 		addtok(line, sizeof(line), "nowait");
 	if (sec_getbool(sec, "nologin", NULL))
 		addtok(line, sizeof(line), "nologin");
+
+	/*
+	 * passenv is handed to the built-in getty as -p, which it turns
+	 * into login -p.  An external getty gets its arguments from
+	 * command, so there is nowhere to put it.
+	 */
+	if (sec_getbool(sec, "passenv", NULL)) {
+		if (dev || !cmd)
+			addtok(line, sizeof(line), "passenv");
+		else
+			logit(LOG_WARNING, "%s: %s: passenv applies to the"
+			      " built-in getty, pass -p in command instead,"
+			      " ignoring", file, cfg_title(sec));
+	}
 
 	if (dev && (str = sec_getstr(sec, "term", NULL)))
 		addtok(line, sizeof(line), "%s", str);

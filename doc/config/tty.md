@@ -24,6 +24,7 @@ Settings common to all three:
 | `noclear` | | Do not clear the TTY after each session |
 | `nowait` | | Do not wait for Enter before the login prompt |
 | `nologin` | | Skip login, give a shell straight away |
+| `passenv` | | Pass the environment on to `login`, built-in getty only |
 
 The `device` variant takes two more:
 

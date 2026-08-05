@@ -43,14 +43,6 @@ service mixed {
     command  = \"serv -np -i mixed\"
 }"
 
-# initctl status prints a detail block for a single match and a table
-# only for several, so count lines in the full listing instead.
-assert_loaded()
-{
-    assert "Service $1 loaded: $2" \
-	   "$(texec initctl -t status | awk -v n="$1" '$2 == n' | wc -l)" -eq "$2"
-}
-
 test_teardown()
 {
     say "Running test teardown."

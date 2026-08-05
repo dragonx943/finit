@@ -8,6 +8,8 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- The `tty` block takes `passenv`, which the line-based format has had
+  since v4.4 (issue #286) and the block format was missing
 - New `provides` setting for run/task/service/sysv blocks, naming
   conditions the service asserts in addition to its own `pid/<ident>`.
   Lets variants of one service, qualified with `if`, share the barrier

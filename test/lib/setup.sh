@@ -41,6 +41,16 @@ assert_num_services()
 	assert "$1 services are loaded" "$(texec initctl -t status "$2" | wc -l)" -eq "$1"
 }
 
+# Unlike assert_num_services() this matches the identity exactly, so
+# 'foo' does not count 'foobar', and an instance must be spelled out as
+# 'foo:1'.  initctl status prints a detail block for a single match and
+# a table only for several, hence counting lines in the full listing.
+assert_loaded()
+{
+	assert "Service $1 loaded: $2" \
+	       "$(texec initctl -t status | awk -v n="$1" '$2 == n' | wc -l)" -eq "$2"
+}
+
 assert_forking()
 {
 	assert "service $1 forking:$2" "$(texec initctl -j status "$1" | jq -M .forking)" = "$2"

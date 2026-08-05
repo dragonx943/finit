@@ -216,6 +216,14 @@ become
         notty    = true
     }
 
+The bare flags keep their names as booleans: `noclear`, `nowait`,
+`nologin`, `passenv`, `rescue`, e.g. `passenv` becomes
+`passenv = true`.
+
+A `tty` block is named by the device, not the title, so all three above
+show up as `tty:ttyS0` and the like in `initctl`.  The title still has
+to be unique within the file.
+
 Top-level directives
 --------------------
 
