@@ -49,6 +49,7 @@ EXTRA_DIST		+= failing-sysv.sh
 EXTRA_DIST		+= svc-env.sh
 EXTRA_DIST		+= global-envs.sh
 EXTRA_DIST		+= initctl-status-subset.sh
+EXTRA_DIST		+= keventd.sh
 EXTRA_DIST		+= notify.sh
 EXTRA_DIST		+= pidfile.sh
 EXTRA_DIST		+= stale-pidfile.sh
@@ -112,6 +113,9 @@ TESTS			+= failing-sysv.sh
 TESTS			+= svc-env.sh
 TESTS			+= global-envs.sh
 TESTS			+= initctl-status-subset.sh
+if KEVENTD
+TESTS			+= keventd.sh
+endif
 TESTS			+= notify.sh
 TESTS			+= pidfile.sh
 TESTS			+= stale-pidfile.sh
