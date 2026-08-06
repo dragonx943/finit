@@ -47,7 +47,7 @@ const char *condstr(enum cond_state s)
 const char *cond_path(const char *name)
 {
 	static char path[256];
-	char tmp[MAX_ARG_LEN];
+	char tmp[MAX_COND_LEN + sizeof(_PATH_COND)];
 
 	snprintf(tmp, sizeof(tmp), _PATH_COND "%s", name);
 

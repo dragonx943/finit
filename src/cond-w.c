@@ -206,7 +206,7 @@ static void cond_bump_reconf(void)
 
 static int cond_checkpath(const char *path)
 {
-	char buf[MAX_ARG_LEN], *dir;
+	char buf[MAX_COND_LEN + sizeof(_PATH_COND)], *dir;
 
 	strlcpy(buf, path, sizeof(buf));
 	dir = dirname(buf);
