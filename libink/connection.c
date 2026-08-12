@@ -35,6 +35,7 @@ int link_connection_call(link_connection_t *conn, const char *destination,
 	uint8_t  hdr[LINK_CALL_HDR_MAX];
 	ssize_t  blen = 0;
 	ssize_t  hlen;
+	struct link_bus *bus;
 	uint32_t serial;
 	int      i;
 
@@ -43,8 +44,12 @@ int link_connection_call(link_connection_t *conn, const char *destination,
 		return -1;
 	}
 
+	bus = __bus_get(conn);
+	if (!bus)
+		return -1;
+
 	for (i = 0; i < LINK_PENDING_CAP; i++) {
-		if (!conn->pending[i].used)
+		if (!bus->pending[i].used)
 			break;
 	}
 	if (i == LINK_PENDING_CAP) {
@@ -80,12 +85,26 @@ int link_connection_call(link_connection_t *conn, const char *destination,
 	__dbg("calling %s.%s on %s, serial %u", interface ? interface : "-",
 	      member, destination ? destination : "peer", serial);
 
-	conn->pending[i].used     = 1;
-	conn->pending[i].serial   = serial;
-	conn->pending[i].cb       = cb;
-	conn->pending[i].userdata = userdata;
+	bus->pending[i].used     = 1;
+	bus->pending[i].serial   = serial;
+	bus->pending[i].cb       = cb;
+	bus->pending[i].userdata = userdata;
 
 	return 0;
+}
+
+struct link_bus *__bus_get(link_connection_t *conn)
+{
+	if (!conn->bus)
+		conn->bus = calloc(1, sizeof(*conn->bus));
+
+	return conn->bus;
+}
+
+void __bus_free(link_connection_t *conn)
+{
+	free(conn->bus);
+	conn->bus = NULL;
 }
 
 void link_connection_close(link_connection_t *conn)

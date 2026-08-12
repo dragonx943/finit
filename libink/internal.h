@@ -70,6 +70,27 @@ struct link_parked {
 	uint8_t             buf[LINK_PARKED_MSG_MAX];
 };
 
+/* Calls in flight in either direction: inbound ones held while we ask
+ * who sent them, outbound ones waiting for their reply.  Both belong
+ * to a conversation with a broker, so this hangs off the connection
+ * and is allocated on first use.  An ordinary peer, which only ever
+ * calls in and is identified by SO_PEERCRED, never gets one.
+ *
+ * Tokens are handed out per bus, which is all link_uid_resolved()
+ * needs: it is told the connection the answer belongs to. */
+struct link_bus {
+	struct link_parked parked[LINK_PARKED_CAP];
+	link_authz_t       next_tok;
+
+	/* Outbound calls we made on this connection, awaiting replies. */
+	struct {
+		int              used;
+		uint32_t         serial;
+		link_reply_cb_t  cb;
+		void            *userdata;
+	} pending[LINK_PENDING_CAP];
+};
+
 struct link_server {
 	int                       fd;
 	char                      path[LINK_PATH_MAX];
@@ -83,8 +104,6 @@ struct link_server {
 	/* Set by link_server_set_authorizer(); see link.h. */
 	link_authorizer_t         authorizer;
 	void                     *authz_userdata;
-	struct link_parked        parked[LINK_PARKED_CAP];
-	link_authz_t              next_tok;
 };
 
 /* The reply being assembled inside a method handler.
@@ -147,15 +166,8 @@ struct link_connection {
 
 	uint32_t            next_serial;
 
-	/* Outbound calls we made on this connection, awaiting replies.
-	 * Only a broker connection uses these today, to ask the bus
-	 * driver who a sender is. */
-	struct {
-		int              used;
-		uint32_t         serial;
-		link_reply_cb_t  cb;
-		void            *userdata;
-	} pending[LINK_PENDING_CAP];
+	/* Allocated on the first park or outbound call, see above. */
+	struct link_bus    *bus;
 
 	struct link_server  *server;	/* back-pointer for dispatch */
 };
@@ -173,6 +185,10 @@ int  __io_read_full(int fd, void *buf,       size_t len);
 int  __auth_process(link_connection_t *conn);
 void __auth_generate_guid(char out[33]);
 int  __auth_client(int fd, uid_t uid);
+
+/* connection.c — the per-connection bus state, made on demand. */
+struct link_bus *__bus_get (link_connection_t *conn);
+void             __bus_free(link_connection_t *conn);
 
 /* dispatch.c */
 int  __dispatch_message(link_connection_t *conn, const struct link_msg *m, size_t framelen);

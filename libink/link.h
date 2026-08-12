@@ -146,8 +146,9 @@ void link_server_set_authorizer(link_server_t *server, link_authorizer_t cb,
 /* Complete a deferred resolve and resume the parked call.  Pass
  * (uid_t)-1 to say the caller could not be identified, which denies
  * it.  Resolving a handle twice, or one whose connection has since
- * closed, does nothing. */
-void link_uid_resolved(link_server_t *server, link_authz_t tok, uid_t uid);
+ * closed, does nothing.  The connection is the one the resolver was
+ * asked about; a reply callback is handed it as its first argument. */
+void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid);
 
 /* Called with the reply to an outbound link_connection_call().  `reply`
  * is NULL if the connection dropped before one arrived. */

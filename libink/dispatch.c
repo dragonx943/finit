@@ -336,8 +336,14 @@ static void deliver_reply(link_connection_t *conn, const struct link_msg *m)
 	void            *userdata;
 	int              i;
 
+	if (!conn->bus) {
+		__dbg("unsolicited reply, serial %u", m->reply_serial);
+		return;
+	}
+
 	for (i = 0; i < LINK_PENDING_CAP; i++) {
-		if (conn->pending[i].used && conn->pending[i].serial == m->reply_serial)
+		if (conn->bus->pending[i].used &&
+		    conn->bus->pending[i].serial == m->reply_serial)
 			break;
 	}
 	if (i == LINK_PENDING_CAP) {
@@ -345,9 +351,9 @@ static void deliver_reply(link_connection_t *conn, const struct link_msg *m)
 		return;
 	}
 
-	cb       = conn->pending[i].cb;
-	userdata = conn->pending[i].userdata;
-	conn->pending[i].used = 0;
+	cb       = conn->bus->pending[i].cb;
+	userdata = conn->bus->pending[i].userdata;
+	conn->bus->pending[i].used = 0;
 
 	if (!cb)
 		return;
@@ -364,26 +370,30 @@ static void deliver_reply(link_connection_t *conn, const struct link_msg *m)
 static struct link_parked *park(link_connection_t *conn, const uint8_t *frame,
 				size_t len, link_authz_t *tok)
 {
-	link_server_t *srv = conn->server;
+	struct link_bus *bus;
 	int i;
 
 	if (!frame || !len || len > LINK_PARKED_MSG_MAX)
 		return NULL;
 
+	bus = __bus_get(conn);
+	if (!bus)
+		return NULL;
+
 	for (i = 0; i < LINK_PARKED_CAP; i++) {
-		if (!srv->parked[i].tok)
+		if (!bus->parked[i].tok)
 			break;
 	}
 	if (i == LINK_PARKED_CAP)
 		return NULL;
 
-	srv->parked[i].tok  = ++srv->next_tok;
-	srv->parked[i].conn = conn;
-	srv->parked[i].len  = len;
-	memcpy(srv->parked[i].buf, frame, len);
-	*tok = srv->parked[i].tok;
+	bus->parked[i].tok  = ++bus->next_tok;
+	bus->parked[i].conn = conn;
+	bus->parked[i].len  = len;
+	memcpy(bus->parked[i].buf, frame, len);
+	*tok = bus->parked[i].tok;
 
-	return &srv->parked[i];
+	return &bus->parked[i];
 }
 
 static void unpark(struct link_parked *p)
@@ -394,46 +404,46 @@ static void unpark(struct link_parked *p)
 
 void __dispatch_forget_conn(link_connection_t *conn)
 {
-	link_server_t *srv = conn->server;
+	struct link_bus *bus = conn->bus;
 	int i;
+
+	if (!bus)
+		return;
 
 	/* Drop parked calls first.  A pending callback below may try to
 	 * resolve one, and resuming a dispatch on a connection that is
 	 * being torn down is no use to anyone; an invalidated slot makes
 	 * that resolve a no-op instead. */
-	if (srv) {
-		for (i = 0; i < LINK_PARKED_CAP; i++) {
-			if (srv->parked[i].conn == conn)
-				unpark(&srv->parked[i]);
-		}
-	}
+	for (i = 0; i < LINK_PARKED_CAP; i++)
+		unpark(&bus->parked[i]);
 
 	for (i = 0; i < LINK_PENDING_CAP; i++) {
-		if (conn->pending[i].used && conn->pending[i].cb)
-			conn->pending[i].cb(conn, NULL, conn->pending[i].userdata);
-		conn->pending[i].used = 0;
+		if (bus->pending[i].used && bus->pending[i].cb)
+			bus->pending[i].cb(conn, NULL, bus->pending[i].userdata);
+		bus->pending[i].used = 0;
 	}
+
+	__bus_free(conn);
 }
 
 static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 			 const uint8_t *frame, size_t framelen,
 			 const uid_t *known_uid);
 
-void link_uid_resolved(link_server_t *server, link_authz_t tok, uid_t uid)
+void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid)
 {
 	uint8_t             buf[LINK_PARKED_MSG_MAX];
 	struct link_parked *p = NULL;
-	link_connection_t  *conn;
 	struct link_msg     msg;
 	size_t              len;
 	int                 i;
 
-	if (!server || !tok)
+	if (!conn || !conn->bus || !tok)
 		return;
 
 	for (i = 0; i < LINK_PARKED_CAP; i++) {
-		if (server->parked[i].tok == tok) {
-			p = &server->parked[i];
+		if (conn->bus->parked[i].tok == tok) {
+			p = &conn->bus->parked[i];
 			break;
 		}
 	}
@@ -442,12 +452,11 @@ void link_uid_resolved(link_server_t *server, link_authz_t tok, uid_t uid)
 
 	/* Copy the message out and free the slot before dispatching:
 	 * the handler may park a call of its own. */
-	conn = p->conn;
-	len  = p->len;
+	len = p->len;
 	memcpy(buf, p->buf, len);
 	unpark(p);
 
-	if (!conn || __msg_parse(buf, len, &msg) <= 0)
+	if (__msg_parse(buf, len, &msg) <= 0)
 		return;
 
 	__dbg("resumed %s, caller uid %d", msg.member ? msg.member : "call", (int)uid);

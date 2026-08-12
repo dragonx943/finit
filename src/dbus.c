@@ -1361,8 +1361,6 @@ static void uid_reply_cb(link_connection_t *conn, const link_reply_t *reply, voi
 	uid_t             uid = (uid_t)-1;
 	uint32_t          val;
 
-	(void)conn;
-
 	if (!reply) {
 		dbg("connection dropped before %s was identified", q->sender);
 	} else if (reply->type == LINK_MSG_METHOD_RETURN &&
@@ -1375,7 +1373,7 @@ static void uid_reply_cb(link_connection_t *conn, const link_reply_t *reply, voi
 		    reply->error_name ? reply->error_name : "unexpected reply");
 	}
 
-	link_uid_resolved(server, q->tok, uid);
+	link_uid_resolved(conn, q->tok, uid);
 	free(q);
 }
 
