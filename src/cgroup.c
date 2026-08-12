@@ -414,9 +414,6 @@ int cgroup_service(const char *name, int pid, struct cgroup *cg, char *username,
 		if (!strcmp(cg->name, "root"))
 			return fnwrite(str("%d", pid), FINIT_CGPATH "/cgroup.procs");
 
-		if (!strcmp(cg->name, "init"))
-			return fnwrite(str("%d", pid), FINIT_CGPATH "/init/cgroup.procs");
-
 		snprintf(path, sizeof(path), "/sys/fs/cgroup/%s", cg->name);
 		if (fisdir(path))
 			group = cg->name;
@@ -818,7 +815,6 @@ int cgroup_del_svc(svc_t *svc, const char *name)
 	return cgroup_del(path);
 }
 
-/* the top-level init cgroup is a leaf, that's ensured in cgroup_init() */
 void cgroup_config(void)
 {
 	struct cg *cg;
@@ -828,15 +824,12 @@ void cgroup_config(void)
 
 	TAILQ_FOREACH(cg, &cgroups, link) {
 		char path[256];
-		int leaf = 0;
 
 		if (!cg->active)
 			continue;
-		if (!strcmp(cg->name, "init"))
-			leaf = 1;	/* reserved */
 
 		snprintf(path, sizeof(path), "%s/%s", FINIT_CGPATH, cg->name);
-		group_init(path, leaf, cg->cfg);
+		group_init(path, 0, cg->cfg);
 
 		strlcat(path, "/cgroup.events", sizeof(path));
 		iwatch_add(&iw_cgroup, path, 0);
@@ -940,20 +933,14 @@ void cgroup_init(uev_ctx_t *ctx)
 		goto abort;
 	}
 
-	/* Default (protected) groups, PID 1, services, and user/login processes */
+	/*
+	 * Protected groups.  PID 1 stays in the root cgroup, a group with
+	 * processes in it cannot delegate controllers to its children.
+	 */
 	cgroup_add("init",   "cpu.weight:100",  1);
 	cgroup_add("system", "cpu.weight:9800", 1);
 	cgroup_add("user",   "cpu.weight:100",  1);
 	cgroup_config();
-
-	/* Move ourselves to init (best effort, otherwise run in 'root' group */
-	if (fnwrite("1", FINIT_CGPATH "/init/cgroup.procs")) {
-		err(1, "Failed moving PID 1 to cgroup %s", FINIT_CGPATH "/init");
-		uev_io_stop(&cgw);
-		iwatch_exit(&iw_cgroup);
-		close(fd);
-		goto abort;
-	}
 }
 
 /**

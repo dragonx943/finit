@@ -42,7 +42,9 @@ the above three.  We leave `init/` and `user/` as-is reducing weight of
     cgroup maint  { cpu.weight = 100  }
 
 By default, the `system/` cgroup is selected for almost everything.  The
-`init/` cgroup is reserved for PID 1 itself and its closest relatives.
+`init/` cgroup is reserved for the early boot helpers Finit drives
+itself, like udev and mdev.  PID 1 runs in the root cgroup, since a
+cgroup holding processes cannot delegate controllers to its children.
 The `user/` cgroup is for local TTY logins spawned by getty.
 
 Joining a Cgroup
