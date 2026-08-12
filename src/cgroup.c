@@ -339,6 +339,10 @@ static int cgroup_create(const char *group, const char *name, const char *cfg,
 					NULL
 				};
 
+				/* non-root delegated services needs permission to mkdir() */
+				if (chown(path, uid, gid))
+					warn("Failed chown %s to %d:%d", path, uid, gid);
+
 				for (int i = 0; files[i]; i++) {
 					snprintf(filepath, sizeof(filepath), "%s/%s", path, files[i]);
 					if (chown(filepath, uid, gid))
