@@ -85,6 +85,9 @@ ssize_t __msg_parse(const uint8_t *buf, size_t len, struct link_msg *out)
 	if (len < HDR_FIXED_SIZE)
 		return 0;
 
+	/* XXX: a big-endian sender is refused rather than byte-swapped.
+	 * Every conforming client on the platforms Finit targets sends
+	 * 'l', so the swap paths have not been worth writing. */
 	if (buf[0] != 'l') {
 		errno = EPROTO;
 		return -1;
