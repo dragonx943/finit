@@ -7,6 +7,14 @@
  * keys cause the whole rule to be rejected so a peer learns its
  * filter didn't take, rather than silently receiving everything.
  *
+ * The exceptions are sender, destination, and eavesdrop, which are
+ * accepted and then ignored.  Clients send them as a matter of
+ * course, and refusing the rule leaves such a peer with no signals at
+ * all, which serves it far worse than a filter wider than it asked
+ * for.  Widening is safe here: Finit is the only sender on this bus,
+ * and everything it emits through the match table is state any peer
+ * that reached the bus may already read.
+ *
  * Copyright (c) 2026  Joachim Wiberg <troglobit@gmail.com>
  * SPDX-License-Identifier: MIT
  */
@@ -103,7 +111,18 @@ struct link_match *__match_parse(const char *rule)
 		else if (!strcmp(key, "interface")) slot = &m->interface;
 		else if (!strcmp(key, "member"))    slot = &m->member;
 		else if (!strcmp(key, "path"))      slot = &m->path;
-		else {
+		else if (!strcmp(key, "sender") ||
+			 !strcmp(key, "destination") ||
+			 !strcmp(key, "eavesdrop")) {
+			/* Understood well enough to accept, see above. */
+			free(key);
+			free(value);
+			continue;
+		} else {
+			/* XXX: argN and argNpath land here, so a rule
+			 * using them takes nothing rather than too
+			 * much.  They narrow on body contents, which
+			 * means parsing the body to honour them. */
 			free(key);
 			free(value);
 			goto bad;

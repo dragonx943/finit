@@ -54,6 +54,26 @@ case "$(cat /tmp/dbus-match.out)" in
     *) fail "Unexpected reply: $(cat /tmp/dbus-match.out)" ;;
 esac
 
+# A client that sends these must still get its signals: refusing the
+# rule would leave it with none at all.  The sender here is deliberately
+# wrong, so a delivered signal proves the key was ignored and not
+# quietly honoured.
+say "AddMatch accepts, and ignores, sender/destination/eavesdrop"
+rm -f /tmp/dbus-ignored.out
+( texec "$CLIENT" monitor-signal "$BUS" \
+    "type='signal',sender='org.freedesktop.DBus',destination=':1.99',eavesdrop='false',interface='org.finit.Cond1',member='ConditionChanged'" \
+    5000 > /tmp/dbus-ignored.out 2>&1 ) &
+ign_pid=$!
+sleep 0.5
+texec "$CLIENT" call-s "$BUS" /org/finit/cond \
+    org.finit.Cond1 Set "dbus-ignored-keys" >/dev/null \
+    || fail "Cond1.Set returned non-zero"
+set +e
+wait "$ign_pid"
+ign_rc=$?
+set -e
+assert "Signal still delivered through the wider rule (rc=$ign_rc)" "$ign_rc" -eq 0
+
 say "Unknown method on a Finit interface gets an org.freedesktop.DBus.Error.* reply"
 set +e
 texec "$CLIENT" unknown "$BUS"
