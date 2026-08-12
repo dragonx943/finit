@@ -70,7 +70,7 @@ Every node implements the usual stock interfaces:
 | `org.freedesktop.DBus`                | `Hello`, `AddMatch`, `RemoveMatch`        |
 | `org.freedesktop.DBus.Peer`           | `Ping`, `GetMachineId`                    |
 | `org.freedesktop.DBus.Introspectable` | `Introspect()` — XML description          |
-| `org.freedesktop.DBus.Properties`     | `Get`, `GetAll` (Set not yet implemented) |
+| `org.freedesktop.DBus.Properties`     | `Get`, `GetAll`; nothing is writable      |
 
 Note: `Hello`, `AddMatch`, and `RemoveMatch` are answered on the canonical
 `/org/freedesktop/DBus` object only, as per the D-Bus specification.
