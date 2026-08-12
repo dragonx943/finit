@@ -10,6 +10,7 @@ EXTRA_DIST		 = skel/bin/busybox-x86_64.sha256 skel/sbin/service.sh skel/etc/env 
 			   skel/etc/rcS.d/S01abc.sh skel/etc/rcS.d/S02def.sh		    \
 			   skel/cdrom/.empty skel/dev/shm/.empty skel/dev/pts/.empty	    \
 			   skel/etc/inittab skel/etc/hostname skel/etc/fstab 		    \
+			   skel/usr/share/dbus-1/system.conf skel/etc/machine-id	    \
 			   skel/etc/passwd skel/etc/group skel/etc/ld.so.conf		    \
 			   skel/etc/init.d/rcS skel/etc/init.d/rcK skel/tmp/.empty	    \
 			   skel/etc/finit.d/.empty skel/etc/finit.d/available/.empty	    \
@@ -73,6 +74,7 @@ EXTRA_DIST		+= testserv.sh
 EXTRA_DIST		+= unexpected-restart.sh
 EXTRA_DIST		+= dbus-auth.sh
 EXTRA_DIST		+= dbus-authz.sh
+EXTRA_DIST		+= dbus-broker.sh
 EXTRA_DIST		+= dbus-bus.sh
 EXTRA_DIST		+= dbus-manager.sh
 EXTRA_DIST		+= dbus-service.sh
@@ -143,6 +145,10 @@ TESTS			+= dbus-service.sh
 TESTS			+= dbus-cond.sh
 TESTS			+= dbus-initctl.sh
 TESTS			+= dbus-introspect.sh
+# Needs the plugin to bring up the bus, not just the built-in one
+if BUILD_DBUS_PLUGIN
+TESTS			+= dbus-broker.sh
+endif
 endif
 
 check-recursive: setup-chroot
