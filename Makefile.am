@@ -35,6 +35,13 @@ endif
 install-dev:
 	@make -C src install-pkgincludeHEADERS
 
+# The fuzz target is built by hand with clang (doc/build.md), so it is
+# not in any _PROGRAMS and nothing else would clear it or the corpus
+# it grows.
+distclean-local:
+	-rm -f  $(top_builddir)/fuzz-msg-parse
+	-rm -rf $(top_builddir)/.fuzz-corpus
+
 # Target to run when building a release
 release: distcheck
 	@for file in $(DIST_ARCHIVES); do		\

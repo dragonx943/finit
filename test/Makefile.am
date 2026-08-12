@@ -75,6 +75,7 @@ EXTRA_DIST		+= unexpected-restart.sh
 EXTRA_DIST		+= dbus-auth.sh
 EXTRA_DIST		+= dbus-authz.sh
 EXTRA_DIST		+= dbus-broker.sh
+EXTRA_DIST		+= fuzz-msg-parse.sh
 EXTRA_DIST		+= dbus-bus.sh
 EXTRA_DIST		+= dbus-manager.sh
 EXTRA_DIST		+= dbus-service.sh
@@ -145,6 +146,7 @@ TESTS			+= dbus-service.sh
 TESTS			+= dbus-cond.sh
 TESTS			+= dbus-initctl.sh
 TESTS			+= dbus-introspect.sh
+TESTS			+= fuzz-msg-parse.sh
 # Needs the plugin to bring up the bus, not just the built-in one
 if BUILD_DBUS_PLUGIN
 TESTS			+= dbus-broker.sh
