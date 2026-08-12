@@ -32,22 +32,11 @@
 #include "config.h"
 #include "helpers.h"
 #include "plugin.h"
-#include "service.h"
-#include "util.h"
 #include "conf.h"
+#include "util.h"
 #include "log.h"
 
 #define DBUS_DAEMON "dbus-daemon"
-#define DBUS_ARGS   "--nofork --system --syslog-only"
-#define DBUS_DESC   "D-Bus message bus daemon"
-
-#ifndef DBUS_DAEMONUSER
-#define DBUS_DAEMONUSER "messagebus"
-#endif
-
-#ifndef DBUS_DAEMONGROUP
-#define DBUS_DAEMONGROUP "messagebus"
-#endif
 
 /*
  * Dumnpster diving for the D-Bus main configuration file
@@ -96,79 +85,35 @@ static char *dbus_pidfn(void)
 	return NULL;
 }
 
+/*
+ * The directories live in tmpfiles.d/dbus.conf and the service in
+ * system/20-dbus.conf, both of which an administrator can override.
+ * What is left needs to look at the running system, so it stays here.
+ */
 static void setup(void *arg)
 {
-	char *group = DBUS_DAEMONGROUP;
-	char *user = DBUS_DAEMONUSER;
-	char esccmd[256];
-	char pid[300];
 	char *pidfn;
-	mode_t prev;
-	char *cmd;
 
 	if (rescue) {
 		dbg("Skipping %s plugin in rescue mode.", "dbus");
 		return;
 	}
 
-	cmd = which(DBUS_DAEMON);
-	if (!cmd) {
+	if (!whichp(DBUS_DAEMON)) {
 		dbg("Skipping plugin, %s is not installed.", DBUS_DAEMON);
 		return;
 	}
 
-	if (getuser(user, NULL) == -1) {
-		if (getuser("dbus", NULL) == -1)
-			user = "root"; /* fallback */
-		else
-			user = "dbus"; /* e.g., Buildroot */
-	}
-
-	if (getgroup(group) == -1) {
-		if (getgroup("dbus") == -1)
-			group = "root"; /* fallback */
-		else
-			group = "dbus"; /* e.g., Buildroot */
-	}
-
 	/* Clean up from any previous pre-bootstrap run */
 	pidfn = dbus_pidfn();
-	if (pidfn)
+	if (pidfn) {
 		remove(pidfn);
-
-	dbg("Creating D-Bus Required Directories ...");
-	prev = umask(0);
-	mksubsys("/var/run/dbus", 0755, user, group);
-	mksubsys("/var/run/lock/subsys", 0755, user, group);
-	mksubsys("/var/lib/dbus", 0755, user, group);
-	mksubsys("/tmp/dbus", 0755, user, group);
-	umask(prev);
+		free(pidfn);
+	}
 
 	/* Generate machine id for dbus */
 	if (whichp("dbus-uuidgen"))
 		run_interactive("dbus-uuidgen --ensure", "Verifying D-Bus machine UUID");
-
-	/*
-	 * Register service with Finit
-	 * Note: dbus drops privs after starting up.
-	 */
-	pid[0] = 0;
-	if (pidfn) {
-		char esc[280];
-
-		snprintf(pid, sizeof(pid), "\tpidfile     = \"%s\"\n",
-			 conf_escape(pidfn, esc, sizeof(esc)));
-		free(pidfn);
-	}
-	conf_save_service(SVC_TYPE_SERVICE, "dbus", "dbus.conf",
-			  "\tdescription = \"" DBUS_DESC "\"\n"
-			  "\trunlevel    = \"S123456789\"\n"
-			  "\tnotify      = \"none\"\n"
-			  "\tcgroup system {}\n"
-			  "%s"
-			  "\tcommand     = \"%s " DBUS_ARGS "\"\n",
-			  pid, conf_escape(cmd, esccmd, sizeof(esccmd)));
-	free(cmd);
 }
 
 static plugin_t plugin = {

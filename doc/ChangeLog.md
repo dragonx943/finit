@@ -8,6 +8,14 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- The `dbus.so` plugin, which starts an external `dbus-daemon`, is now
+  enabled by default.  It does nothing on systems without a
+  `dbus-daemon` installed, and `--disable-dbus-plugin` opts out.  The
+  daemon it used to register from C now lives in `20-dbus.conf`, and
+  the directories it needs in `tmpfiles.d/dbus.conf`, so both can be
+  overridden from `/etc` like any other system file.  Those
+  directories are no longer chowned to `messagebus`, matching how
+  Finit ships directories for other daemons
 - The `tty` block takes `passenv`, which the line-based format has had
   since v4.4 (issue #286) and the block format was missing
 - New `provides` setting for run/task/service/sysv blocks, naming
