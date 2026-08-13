@@ -62,10 +62,12 @@ TAILQ_HEAD(link_object_list, link_object);
 /* An inbound method call held while we find out who sent it.  The
  * message is copied because rxbuf is reused as soon as we return to
  * the read loop.  `tok` is the handle the resolver answers with, and
- * zero when the slot is free. */
+ * zero when the slot is free.  `stamp` is when it was parked, for
+ * link_connection_expire(). */
 struct link_parked {
 	link_authz_t        tok;
 	link_connection_t  *conn;
+	uint64_t            stamp;
 	size_t              len;
 	uint8_t             buf[LINK_PARKED_MSG_MAX];
 };
@@ -86,6 +88,7 @@ struct link_bus {
 	struct {
 		int              used;
 		uint32_t         serial;
+		uint64_t         stamp;	/* for link_connection_expire() */
 		link_reply_cb_t  cb;
 		void            *userdata;
 	} pending[LINK_PENDING_CAP];
@@ -177,9 +180,11 @@ void __log(const char *func, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
 #define __dbg(fmt, ...)  __log(__func__, fmt, ##__VA_ARGS__)
 
-/* io.c — shared EINTR-resilient I/O loops. */
+/* io.c — shared EINTR-resilient I/O loops, and the clock the expiry
+ * sweeps measure against. */
 int  __io_write_all(int fd, const void *buf, size_t len);
 int  __io_read_full(int fd, void *buf,       size_t len);
+uint64_t __now_ms(void);
 
 /* auth.c */
 int  __auth_process(link_connection_t *conn);
@@ -193,6 +198,7 @@ void             __bus_free(link_connection_t *conn);
 /* dispatch.c */
 int  __dispatch_message(link_connection_t *conn, const struct link_msg *m, size_t framelen);
 void __dispatch_forget_conn(link_connection_t *conn);
+int  __dispatch_expire_parked(link_connection_t *conn, unsigned int age_ms);
 int  __send_error(link_connection_t *conn, const struct link_msg *req,
 		     const char *error_name, const char *text);
 int  __send_method_return(link_connection_t *conn, const struct link_msg *req,

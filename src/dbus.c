@@ -107,6 +107,50 @@ static void peer_reap(void *arg)
 static struct wq reap_work = { .cb = peer_reap, .delay = 10 };
 
 /*
+ * Nothing in libink can time itself out, it has no event loop, so the
+ * deadline for a parked call and for a call we made on the broker is
+ * ours to keep.  The sweep only runs while something is outstanding:
+ * expire_arm() starts it, and it stops rearming as soon as nothing is
+ * left, so a system that never talks to a broker never wakes up for
+ * this.
+ */
+#define DBUS_CALL_TIMEOUT_MS 5000
+#define DBUS_SWEEP_MS        1000
+
+static void expire_sweep(void *arg);
+static struct wq expire_work = { .cb = expire_sweep, .delay = DBUS_SWEEP_MS };
+static int expire_armed;
+
+/* Idempotent: several parks in one turn of the loop share one sweep. */
+static void expire_arm(void)
+{
+	if (expire_armed)
+		return;
+	if (!schedule_work(&expire_work))
+		expire_armed = 1;
+}
+
+static void expire_sweep(void *arg)
+{
+	struct peer *p, *tmp;
+	int live = 0;
+
+	(void)arg;
+	expire_armed = 0;
+
+	/* _SAFE because expiring a call runs its callback, and a
+	 * callback that ends up writing to a peer can drop it, which
+	 * unlinks it from this very list. */
+	TAILQ_FOREACH_SAFE(p, &peers, link, tmp) {
+		if (!p->dead)
+			live += link_connection_expire(p->conn, DBUS_CALL_TIMEOUT_MS);
+	}
+
+	if (live)
+		expire_arm();
+}
+
+/*
  * A peer can be dropped from inside its own read loop: a handler emits
  * a signal, the write to this very peer fails, and dbus_emit_signal()
  * lands here while link_connection_process() still holds the
@@ -1409,6 +1453,10 @@ static int sysbus_uid_resolver(link_connection_t *conn, const char *sender,
 		free(q);
 		return -1;
 	}
+
+	/* Both the call and the park it belongs to now have a deadline
+	 * to answer by, so make sure something is watching the clock. */
+	expire_arm();
 
 	return 1;	/* parked; uid_reply_cb() answers */
 }

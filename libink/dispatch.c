@@ -387,9 +387,10 @@ static struct link_parked *park(link_connection_t *conn, const uint8_t *frame,
 	if (i == LINK_PARKED_CAP)
 		return NULL;
 
-	bus->parked[i].tok  = ++bus->next_tok;
-	bus->parked[i].conn = conn;
-	bus->parked[i].len  = len;
+	bus->parked[i].tok   = ++bus->next_tok;
+	bus->parked[i].conn  = conn;
+	bus->parked[i].stamp = __now_ms();
+	bus->parked[i].len   = len;
 	memcpy(bus->parked[i].buf, frame, len);
 	*tok = bus->parked[i].tok;
 
@@ -400,6 +401,51 @@ static void unpark(struct link_parked *p)
 {
 	p->tok  = 0;
 	p->conn = NULL;
+}
+
+/* A resolver that answers late, or never, would otherwise hold both
+ * the slot and the caller forever.  Returns how many are still parked;
+ * link_connection_expire() is what calls this. */
+int __dispatch_expire_parked(link_connection_t *conn, unsigned int age_ms)
+{
+	uint64_t now;
+	int i, live = 0;
+
+	if (!conn->bus)
+		return 0;
+
+	now = __now_ms();
+	for (i = 0; i < LINK_PARKED_CAP; i++) {
+		struct link_parked *p = &conn->bus->parked[i];
+		uint8_t             buf[LINK_PARKED_MSG_MAX];
+		struct link_msg     msg;
+		size_t              len;
+
+		if (!p->tok)
+			continue;
+
+		if (now - p->stamp < age_ms) {
+			live++;
+			continue;
+		}
+
+		/* Free the slot before replying, as link_uid_resolved()
+		 * does: the send path must not find it still parked. */
+		len = p->len;
+		memcpy(buf, p->buf, len);
+		unpark(p);
+
+		if (__msg_parse(buf, len, &msg) <= 0)
+			continue;
+
+		__dbg("timed out %s, nobody said who the caller was",
+		      msg.member ? msg.member : "call");
+		(void)__send_error(conn, &msg,
+				   "org.freedesktop.DBus.Error.TimedOut",
+				   "Timed out identifying the caller");
+	}
+
+	return live;
 }
 
 void __dispatch_forget_conn(link_connection_t *conn)

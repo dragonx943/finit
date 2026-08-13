@@ -164,6 +164,18 @@ int link_connection_call(link_connection_t *conn, const char *destination,
 			 link_reply_cb_t cb, void *userdata,
 			 const char *signature, ...);
 
+/* Nothing in libink runs a clock, it has no event loop, so calls that
+ * go unanswered in either direction are the embedder's to time out.
+ * This drops anything held longer than `age_ms` on one connection: a
+ * park whose resolver never answered, which leaves its caller
+ * org.freedesktop.DBus.Error.TimedOut, and a call whose reply never
+ * came, whose callback runs once with a NULL reply exactly as a
+ * dropped connection would.
+ *
+ * Returns how many are still outstanding, so a sweep can stop
+ * rearming once nothing is left. */
+int link_connection_expire(link_connection_t *conn, unsigned int age_ms);
+
 /* ----------  server / connection lifecycle  ---------- */
 
 /* Bind a listening socket at `path` with file mode `mode`, e.g. 0660

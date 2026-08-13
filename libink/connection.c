@@ -87,6 +87,7 @@ int link_connection_call(link_connection_t *conn, const char *destination,
 
 	bus->pending[i].used     = 1;
 	bus->pending[i].serial   = serial;
+	bus->pending[i].stamp    = __now_ms();
 	bus->pending[i].cb       = cb;
 	bus->pending[i].userdata = userdata;
 
@@ -105,6 +106,45 @@ void __bus_free(link_connection_t *conn)
 {
 	free(conn->bus);
 	conn->bus = NULL;
+}
+
+/* Neither half can time itself out, libink has no event loop, so the
+ * embedder sweeps.  Calls go first: one timing out usually resolves
+ * the park it was made for, and being told AccessDenied says more to
+ * that caller than a bare timeout. */
+int link_connection_expire(link_connection_t *conn, unsigned int age_ms)
+{
+	struct link_bus *bus;
+	uint64_t now;
+	int i, live = 0;
+
+	if (!conn || !conn->bus)
+		return 0;
+
+	bus = conn->bus;
+	now = __now_ms();
+	for (i = 0; i < LINK_PENDING_CAP; i++) {
+		link_reply_cb_t  cb;
+		void            *userdata;
+
+		if (!bus->pending[i].used)
+			continue;
+
+		if (now - bus->pending[i].stamp < age_ms) {
+			live++;
+			continue;
+		}
+
+		cb       = bus->pending[i].cb;
+		userdata = bus->pending[i].userdata;
+		bus->pending[i].used = 0;
+
+		__dbg("timed out call serial %u, no reply", bus->pending[i].serial);
+		if (cb)
+			cb(conn, NULL, userdata);
+	}
+
+	return live + __dispatch_expire_parked(conn, age_ms);
 }
 
 void link_connection_close(link_connection_t *conn)

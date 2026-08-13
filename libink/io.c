@@ -5,14 +5,29 @@
  * read_full.  On any other error they return -1 with an unknown
  * number of bytes already transferred.
  *
+ * Also the clock the expiry sweeps measure against: monotonic, so a
+ * step in wall time cannot make a call look older or younger than it
+ * is.
+ *
  * Copyright (c) 2026  Joachim Wiberg <troglobit@gmail.com>
  * SPDX-License-Identifier: MIT
  */
 
 #include <errno.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "internal.h"
+
+uint64_t __now_ms(void)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts))
+		return 0;
+
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)(ts.tv_nsec / 1000000);
+}
 
 int __io_write_all(int fd, const void *buf, size_t len)
 {
