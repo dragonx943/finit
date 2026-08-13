@@ -65,14 +65,23 @@ static TAILQ_HEAD(, peer) peers = TAILQ_HEAD_INITIALIZER(peers);
 static link_server_t      *server;
 static uev_t              accept_watcher;
 static size_t             peer_count;
+static struct peer        *sysbus_peer;
+
+static void sysbus_probe(void);
 
 static void peer_drop(struct peer *p)
 {
+	int was_sysbus = p == sysbus_peer;
+
 	uev_io_stop(&p->watcher);
 	link_connection_close(p->conn);
 	TAILQ_REMOVE(&peers, p, link);
 	peer_count--;
 	free(p);
+
+	/* broker gone; the notify paths probe for its return */
+	if (was_sysbus)
+		sysbus_peer = NULL;
 }
 
 static void peer_cb(uev_t *w, void *arg, int events)
@@ -456,7 +465,7 @@ static int prop_runlevel(link_writer_t *w, void *u)
 
 	(void)u;
 	snprintf(buf, sizeof(buf), "%d", runlevel);
-	link_w_variant_string(w, buf);
+	link_w_string(w, buf);
 	return 0;
 }
 
@@ -466,14 +475,14 @@ static int prop_prevrunlevel(link_writer_t *w, void *u)
 
 	(void)u;
 	snprintf(buf, sizeof(buf), "%d", prevlevel);
-	link_w_variant_string(w, buf);
+	link_w_string(w, buf);
 	return 0;
 }
 
 static int prop_version(link_writer_t *w, void *u)
 {
 	(void)u;
-	link_w_variant_string(w, PACKAGE_VERSION);
+	link_w_string(w, PACKAGE_VERSION);
 	return 0;
 }
 
@@ -576,9 +585,146 @@ static const link_method_t service_methods[] = {
 	{ NULL, NULL, NULL, 0, NULL }
 };
 
+/*
+ * Getters write the bare value; the framework emits the variant
+ * signature from the table below.  `State` deliberately uses the
+ * initctl status vocabulary from svc_status(), not the coarser
+ * ServiceStateChanged strings -- a client that only tracks edges
+ * has the signal, a client that asks gets the full story.
+ */
+#define SVC_PROP_STR(fn, field)					\
+static int fn(link_writer_t *w, void *arg)			\
+{								\
+	link_w_string(w, ((svc_t *)arg)->field);		\
+	return 0;						\
+}
+
+#define SVC_PROP_U32(fn, field)					\
+static int fn(link_writer_t *w, void *arg)			\
+{								\
+	link_w_u32(w, (uint32_t)((svc_t *)arg)->field);		\
+	return 0;						\
+}
+
+#define SVC_PROP_BOOL(fn, field)				\
+static int fn(link_writer_t *w, void *arg)			\
+{								\
+	link_w_bool(w, ((svc_t *)arg)->field);			\
+	return 0;						\
+}
+
+static int svc_prop_identity(link_writer_t *w, void *arg)
+{
+	link_w_string(w, svc_ident(arg, NULL, 0));
+	return 0;
+}
+
+static int svc_prop_state(link_writer_t *w, void *arg)
+{
+	link_w_string(w, svc_status(arg));
+	return 0;
+}
+
+static int svc_prop_type(link_writer_t *w, void *arg)
+{
+	link_w_string(w, svc_typestr((svc_t *)arg));
+	return 0;
+}
+
+static int svc_prop_command(link_writer_t *w, void *arg)
+{
+	svc_t *svc = arg;
+	char   buf[512];
+
+	compose_cmdline(svc, buf, sizeof(buf));
+	if (svc_is_sysv(svc)) {
+		strlcat(buf, " ", sizeof(buf));
+		strlcat(buf, svc->state == SVC_HALTED_STATE
+			? "stop" : "start", sizeof(buf));
+	}
+
+	link_w_string(w, buf);
+	return 0;
+}
+
+static int svc_prop_pid(link_writer_t *w, void *arg)
+{
+	svc_t *svc = arg;
+
+	link_w_u32(w, svc->pid > 0 ? (uint32_t)svc->pid : 0);
+	return 0;
+}
+
+static int svc_prop_restarts(link_writer_t *w, void *arg)
+{
+	svc_t *svc = arg;
+
+	link_w_u32(w, svc->restart_cnt > 0 ? (uint32_t)svc->restart_cnt : 0);
+	return 0;
+}
+
+static int svc_prop_uptime(link_writer_t *w, void *arg)
+{
+	svc_t *svc = arg;
+	long   up = 0;
+
+	if (svc->pid > 0) {
+		up = jiffies() - svc->start_time;
+		if (up < 0)
+			up = 0;
+	}
+	link_w_u32(w, (uint32_t)up);
+	return 0;
+}
+
+SVC_PROP_STR (svc_prop_name,         name)
+SVC_PROP_STR (svc_prop_desc,         desc)
+SVC_PROP_STR (svc_prop_conditions,   cond)
+SVC_PROP_STR (svc_prop_origin,       file)
+SVC_PROP_STR (svc_prop_environ,      env)
+SVC_PROP_STR (svc_prop_pidfile,      pidfile)
+SVC_PROP_STR (svc_prop_user,         username)
+SVC_PROP_STR (svc_prop_group,        group)
+SVC_PROP_U32 (svc_prop_runlevels,    runlevels)
+SVC_PROP_U32 (svc_prop_exitstatus,   status)
+SVC_PROP_U32 (svc_prop_restarts_tot, restart_tot)
+SVC_PROP_U32 (svc_prop_restart_max,  restart_max)
+SVC_PROP_U32 (svc_prop_starts,       once)
+SVC_PROP_BOOL(svc_prop_manual,       manual)
+SVC_PROP_BOOL(svc_prop_forking,      forking)
+SVC_PROP_BOOL(svc_prop_started,      started)
+
+static const link_property_t service_properties[] = {
+	{ .name = "Identity",     .sig = "s", .getter = svc_prop_identity   },
+	{ .name = "Name",         .sig = "s", .getter = svc_prop_name       },
+	{ .name = "State",        .sig = "s", .getter = svc_prop_state      },
+	{ .name = "Pid",          .sig = "u", .getter = svc_prop_pid        },
+	{ .name = "RestartCount", .sig = "u", .getter = svc_prop_restarts   },
+	{ .name = "Runlevels",    .sig = "u", .getter = svc_prop_runlevels  },
+	{ .name = "Description",  .sig = "s", .getter = svc_prop_desc       },
+	{ .name = "Command",      .sig = "s", .getter = svc_prop_command    },
+	{ .name = "Conditions",   .sig = "s", .getter = svc_prop_conditions },
+	{ .name = "Type",         .sig = "s", .getter = svc_prop_type       },
+	{ .name = "Origin",       .sig = "s", .getter = svc_prop_origin     },
+	{ .name = "Environment",  .sig = "s", .getter = svc_prop_environ    },
+	{ .name = "PidFile",      .sig = "s", .getter = svc_prop_pidfile    },
+	{ .name = "User",         .sig = "s", .getter = svc_prop_user       },
+	{ .name = "Group",        .sig = "s", .getter = svc_prop_group      },
+	{ .name = "Uptime",       .sig = "u", .getter = svc_prop_uptime     },
+	{ .name = "ExitStatus",   .sig = "u", .getter = svc_prop_exitstatus },
+	{ .name = "RestartsTotal",.sig = "u", .getter = svc_prop_restarts_tot },
+	{ .name = "RestartMax",   .sig = "u", .getter = svc_prop_restart_max },
+	{ .name = "Starts",       .sig = "u", .getter = svc_prop_starts     },
+	{ .name = "ManualStart",  .sig = "b", .getter = svc_prop_manual     },
+	{ .name = "Forking",      .sig = "b", .getter = svc_prop_forking    },
+	{ .name = "Started",      .sig = "b", .getter = svc_prop_started    },
+	{ NULL, NULL, NULL }
+};
+
 static const link_vtable_t service_vtable = {
-	.interface = "org.finit.Service1",
-	.methods   = service_methods,
+	.interface  = "org.finit.Service1",
+	.methods    = service_methods,
+	.properties = service_properties,
 };
 
 /* Build the canonical object path for a service.  Identity is
@@ -693,10 +839,14 @@ void dbus_notify_service_state(svc_t *svc, int old_state, int new_state)
 	uint8_t      body[256];
 	link_writer_t w;
 	char         ident[MAX_IDENT_LEN];
+	char         path[FINIT_SVC_PATH_MAX];
 	ssize_t      blen;
 
 	if (!svc)
 		return;
+
+	sysbus_probe();
+
 	svc_ident(svc, ident, sizeof(ident));
 
 	link_writer_init(&w, body, sizeof(body));
@@ -709,6 +859,35 @@ void dbus_notify_service_state(svc_t *svc, int old_state, int new_state)
 
 	dbus_emit_signal("/org/finit/manager", "org.finit.Manager1",
 			 "ServiceStateChanged", "sss", body, (size_t)blen);
+
+	/*
+	 * Dual emission: Properties-aware clients track one object via
+	 * the standard PropertiesChanged instead of filtering the
+	 * manager-wide signal.  Volatile numerics are invalidated, not
+	 * marshalled -- interested clients re-Get.
+	 */
+	if (service_path_for(svc, path, sizeof(path)) < 0)
+		return;
+
+	link_writer_init(&w, body, sizeof(body));
+	link_w_string(&w, "org.finit.Service1");
+	link_w_array_begin(&w, '{');
+	link_w_struct_begin(&w);
+	link_w_string(&w, "State");
+	link_w_variant_string(&w, svc_status(svc));
+	link_w_struct_end(&w);
+	link_w_array_end(&w);
+	link_w_array_begin(&w, 's');
+	link_w_string(&w, "Pid");
+	link_w_string(&w, "RestartCount");
+	link_w_array_end(&w);
+	blen = link_writer_finish(&w);
+	if (blen < 0)
+		return;
+
+	dbus_emit_signal(path, "org.freedesktop.DBus.Properties",
+			 "PropertiesChanged", "sa{sv}as",
+			 body, (size_t)blen);
 }
 
 /* ---------- signal emission: RunlevelChanged ----------
@@ -960,6 +1139,8 @@ void dbus_notify_condition_change(const char *name, const char *state)
 	if (!name || !state)
 		return;
 
+	sysbus_probe();
+
 	link_writer_init(&w, body, sizeof(body));
 	link_w_string(&w, name);
 	link_w_string(&w, state);
@@ -1018,17 +1199,18 @@ static int sysbus_request_name(link_client_t *c)
 	return (result == 1) ? 0 : -1;
 }
 
-static void try_attach_system_bus(uev_ctx_t *ctx)
+static int try_attach_system_bus(uev_ctx_t *ctx)
 {
 	link_client_t     *c;
 	link_connection_t *conn;
+	struct peer       *p;
 	int rc;
 
 	c = link_client_open_timeout(SYSTEM_BUS_PATH, SYSTEM_BUS_TIMEOUT_MS);
 	if (!c) {
 		dbg("System bus unavailable at %s; skipping registration",
 		    SYSTEM_BUS_PATH);
-		return;
+		return -1;
 	}
 
 	rc = link_client_call_v(c, "/org/freedesktop/DBus",
@@ -1036,13 +1218,13 @@ static void try_attach_system_bus(uev_ctx_t *ctx)
 	if (rc != LINK_CALL_OK) {
 		dbg("System-bus Hello failed (rc=%d); skipping", rc);
 		link_client_close(c);
-		return;
+		return -1;
 	}
 
 	if (sysbus_request_name(c) < 0) {
 		logit(LOG_WARNING, "Failed to claim %s on system bus", FINIT_BUS_NAME);
 		link_client_close(c);
-		return;
+		return -1;
 	}
 
 	/* link_server_attach owns the fd from this point on whether it
@@ -1050,14 +1232,55 @@ static void try_attach_system_bus(uev_ctx_t *ctx)
 	 * window. */
 	conn = link_server_attach(server, link_client_steal_fd(c), (uid_t)-1);
 	if (!conn)
-		return;
+		return -1;
 
-	if (!peer_register(ctx, conn)) {
+	p = peer_register(ctx, conn);
+	if (!p) {
 		logit(LOG_WARNING, "Failed registering system-bus peer");
-		return;
+		return -1;
 	}
 
+	sysbus_peer = p;
 	logit(LOG_NOTICE, "Registered %s on system bus", FINIT_BUS_NAME);
+	return 0;
+}
+
+/*
+ * The broker is usually not up yet when dbus_init() runs -- it is
+ * typically a finit service itself -- and it may restart at any
+ * time.  The service and condition notify paths call sysbus_probe()
+ * on every event: when org.finit is unclaimed and the broker's
+ * socket exists, one coalesced attach attempt is scheduled.  This
+ * stays daemon-agnostic -- only the socket is probed, never a
+ * service name -- and the broker's own service transitions are what
+ * trigger it.
+ */
+static uev_t sysbus_tmr;
+static int   sysbus_tmr_up;
+
+static void sysbus_probe_cb(uev_t *w, void *arg, int events)
+{
+	(void)arg;
+	(void)events;
+
+	if (!sysbus_peer)
+		(void)try_attach_system_bus(w->ctx);
+}
+
+static void sysbus_probe(void)
+{
+	if (sysbus_peer || !server)
+		return;
+	if (access(SYSTEM_BUS_PATH, F_OK))
+		return;
+
+	/* coalesce bursts to a single probe */
+	if (!sysbus_tmr_up)
+		sysbus_tmr_up = !uev_timer_init(ctx, &sysbus_tmr,
+						sysbus_probe_cb, NULL,
+						200, 0);
+	else
+		uev_timer_set(&sysbus_tmr, 200, 0);
 }
 
 /* ---------- init / exit ---------- */
@@ -1107,7 +1330,7 @@ int dbus_init(uev_ctx_t *ctx)
 			dbus_register_service(svc);
 	}
 
-	try_attach_system_bus(ctx);
+	(void)try_attach_system_bus(ctx);
 
 	return 0;
 }
@@ -1116,6 +1339,10 @@ int dbus_exit(void)
 {
 	struct peer *p;
 
+	if (sysbus_tmr_up) {
+		uev_timer_stop(&sysbus_tmr);
+		sysbus_tmr_up = 0;
+	}
 	uev_io_stop(&accept_watcher);
 
 	while ((p = TAILQ_FIRST(&peers)))

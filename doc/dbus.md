@@ -127,6 +127,41 @@ look up the exact path rather than constructing it by hand.
 | `Restart` | —      | —       | yes | … |
 | `Reload`  | —      | —       | yes | Reload (SIGHUP if supported, else restart). |
 
+### Properties
+
+All read-only; observable via `Properties.Get` and `Properties.GetAll`.
+
+| Property       | Type | Returns |
+| -------------- | ---- | ------- |
+| `Identity`     | `s`  | Service identity, `name` or `name:id`. |
+| `Name`         | `s`  | Program name (basename of the command). |
+| `State`        | `s`  | Current status, same vocabulary as `initctl status` (richer than the coarse `ServiceStateChanged` strings). |
+| `Pid`          | `u`  | Current PID, 0 when not running. |
+| `RestartCount` | `u`  | Restarts since the last stable run. |
+| `Runlevels`    | `u`  | Allowed runlevels as a bitmask, bit N = runlevel N, bit 10 = S. |
+| `Description`  | `s`  | The service's `description` string. |
+| `Command`      | `s`  | Full command line, arguments included. |
+| `Conditions`   | `s`  | Declared conditions, raw `.conf` form. |
+| `Type`         | `s`  | Unit type: `service`, `task`, `run`, `sysv`, `tty`, `free`. |
+| `Origin`       | `s`  | Source `.conf` file, empty for built-ins. |
+| `Environment`  | `s`  | The service's `env` setting, raw. |
+| `PidFile`      | `s`  | Declared PID file, raw (`!` prefix included). |
+| `User`         | `s`  | User the service runs as. |
+| `Group`        | `s`  | Group the service runs as. |
+| `Uptime`       | `u`  | Seconds since start, 0 when not running. |
+| `ExitStatus`   | `u`  | Raw `waitpid(2)` status from the last exit. |
+| `RestartsTotal`| `u`  | Restarts over the service's lifetime. |
+| `RestartMax`   | `u`  | Restart limit before the service is blocked. |
+| `Starts`       | `u`  | Times started, for `manual-start` units. |
+| `ManualStart`  | `b`  | `manual-start` set in the `.conf`. |
+| `Forking`      | `b`  | Daemon forks to background. |
+| `Started`      | `b`  | Run/task completed successfully. |
+
+On every state transition the object also emits the standard
+`org.freedesktop.DBus.Properties.PropertiesChanged` signal: `State`
+in the changed dictionary, `Pid` and `RestartCount` invalidated (call
+`Get` for fresh values).
+
 The per-service surface lets generic tooling supply an object handle
 once and then invoke methods on it, instead of repeatedly passing the
 identity string.
