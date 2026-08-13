@@ -96,6 +96,18 @@ int   link_server_get_fd(const link_server_t *server);
 
 int   link_server_accept(link_server_t *server, link_connection_t **conn);
 
+/* Insert an externally-authenticated fd into the server's connection
+ * set.  Used to integrate an outbound peer (e.g. a client-side
+ * handshake against an external dbus-daemon) so the same dispatch +
+ * signal-fan-out machinery covers it.  `peer_uid` becomes what
+ * privileged-method checks see; pass (uid_t)-1 to make all
+ * LINK_METHOD_PRIVILEGED methods reject by default.
+ *
+ * On success the connection takes ownership of `fd`.  On any failure
+ * `fd` is closed before the function returns NULL, so callers never
+ * have to track partial state. */
+link_connection_t *link_server_attach(link_server_t *server, int fd, uid_t peer_uid);
+
 int   link_connection_get_fd  (const link_connection_t *conn);
 uid_t link_connection_get_uid (const link_connection_t *conn);
 int   link_connection_process (link_connection_t *conn);
@@ -116,9 +128,22 @@ typedef struct {
 	link_method_fn  handler;
 } link_method_t;
 
+/* A read-only property descriptor.  Set via the Properties.Set side
+ * is not yet implemented; only Get and GetAll are.  The getter writes
+ * the property's value as a D-Bus variant (use link_w_variant_string
+ * for "s"-typed properties) into the provided writer. */
+typedef int (*link_property_getter_fn)(link_writer_t *w, void *userdata);
+
 typedef struct {
-	const char         *interface;          /* e.g. "org.finit.Manager1" */
-	const link_method_t *methods;            /* terminated by {NULL, ...} */
+	const char            *name;      /* property name */
+	const char            *sig;       /* D-Bus signature, e.g. "s" */
+	link_property_getter_fn getter;
+} link_property_t;
+
+typedef struct {
+	const char            *interface;     /* e.g. "org.finit.Manager1" */
+	const link_method_t   *methods;       /* terminated by {NULL, ...}, or NULL */
+	const link_property_t *properties;    /* terminated by {NULL, ...}, or NULL */
 } link_vtable_t;
 
 /* Register one (interface, methods) at `path`.  Calling repeatedly
@@ -189,7 +214,22 @@ int link_connection_emit_signal(link_connection_t *conn,
  * Returns NULL on any failure (caller can fall back to another
  * transport if it has one). */
 link_client_t *link_client_open(const char *path);
+
+/* As link_client_open but applies SO_SNDTIMEO + SO_RCVTIMEO before
+ * the connect/AUTH handshake.  After link_server_attach flips the fd
+ * to non-blocking the timeout is silently inert; it only protects
+ * the synchronous open path against a hung peer.  timeout_ms == 0
+ * disables the budget (same behaviour as link_client_open). */
+link_client_t *link_client_open_timeout(const char *path, int timeout_ms);
+
 void           link_client_close(link_client_t *c);
+
+/* Detach the authenticated socket from the client and return the raw
+ * fd; subsequent link_client_close on `c` is invalid because the
+ * structure has already been freed.  Used by callers (e.g. system-bus
+ * integration) that want to promote an outbound client connection
+ * into a server-attached peer via link_server_attach(). */
+int link_client_steal_fd(link_client_t *c);
 
 /* Status codes returned by link_client_call(_v). */
 #define LINK_CALL_OK     0   /* method-return received */
@@ -234,6 +274,14 @@ int link_client_call_v(link_client_t *c,
 
 const link_reply_t *link_client_reply(link_client_t *c);
 
+/* Convenience accessors for the common case where a reply carries
+ * exactly one string ("s" or "o") or one u32 ("u").  They wrap the
+ * link_reader_init + link_r_* pattern; on success return 0 and
+ * populate *out, on parse failure or missing body return -1.  Use
+ * link_client_reply + link_reader_init directly for richer payloads. */
+int link_reply_get_string(const link_reply_t *r, const char **out);
+int link_reply_get_u32   (const link_reply_t *r, uint32_t   *out);
+
 /* Wait up to `timeout_ms` milliseconds for the next inbound message
  * (typically a SIGNAL delivered after an AddMatch subscription), and
  * populate the same view returned by link_client_reply().
@@ -264,6 +312,7 @@ void link_w_bool    (link_writer_t *w, int v);
 void link_w_u32     (link_writer_t *w, uint32_t v);
 void link_w_string  (link_writer_t *w, const char *s);  /* "s" */
 void link_w_path    (link_writer_t *w, const char *s);  /* "o" */
+void link_w_variant_string(link_writer_t *w, const char *s); /* "v" containing "s" */
 void link_w_array_begin (link_writer_t *w, char element_sig);
 void link_w_array_end   (link_writer_t *w);
 void link_w_struct_begin(link_writer_t *w);
@@ -280,12 +329,21 @@ int    link_r_bool    (link_reader_t *r, int      *out);
 int    link_r_u32     (link_reader_t *r, uint32_t *out);
 int    link_r_string  (link_reader_t *r, const char **out);  /* "s" */
 int    link_r_path    (link_reader_t *r, const char **out);  /* "o" */
+int    link_r_variant_string(link_reader_t *r, const char **out); /* "v" containing "s" */
+int    link_r_align   (link_reader_t *r, size_t n);  /* skip to next n-byte boundary */
 int    link_r_done    (const link_reader_t *r);
 
-/* Byte offset of the next read inside the original body buffer.  Used
- * to detect end-of-array when walking "a<T>" payloads: read the array
- * byte-length prefix with link_r_u32 first, record (pos+length) as the
- * end, then loop while link_r_pos < end. */
+/* Begin reading an "a<T>" array.  On success returns 0 and sets
+ * *out_end to the absolute reader offset at which the array ends;
+ * caller loops while link_r_pos < *out_end.  For dict-entry arrays
+ * ("a{T}") call link_r_align(r, 8) at the top of each iteration --
+ * the element-alignment skip from the array prefix only covers the
+ * first entry. */
+int    link_r_array_begin(link_reader_t *r, size_t *out_end);
+
+/* Byte offset of the next read inside the original body buffer.
+ * Use together with the *out_end returned by link_r_array_begin to
+ * walk the elements of an "a<T>" payload. */
 size_t link_r_pos     (const link_reader_t *r);
 
 #ifdef __cplusplus

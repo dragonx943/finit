@@ -67,3 +67,69 @@ case "$result" in
     *InvalidArgs*)  assert "Non-root reached signature check (InvalidArgs, not AccessDenied)" 0 -eq 0 ;;
     *)              fail "Unexpected reply from non-root ListServices: $result" ;;
 esac
+
+# ---------- Properties ----------
+
+say "Introspect on /org/finit/manager advertises org.freedesktop.DBus.Properties"
+xml=$(texec "$CLIENT" introspect "$BUS" /org/finit/manager)
+case "$xml" in
+    *'org.freedesktop.DBus.Properties'*) assert "Properties interface in XML" 0 -eq 0 ;;
+    *) fail "Properties interface missing from XML" ;;
+esac
+
+say "Manager1 declares Runlevel + Version as <property> in introspection XML"
+case "$xml" in
+    *'<property name="Runlevel"'*'<property name="Version"'*)
+        assert "Runlevel and Version both declared" 0 -eq 0 ;;
+    *)
+        fail "Property declarations missing or out of order: $xml" ;;
+esac
+
+# ---------- arc B: SetDebug + Suspend authz ----------
+
+say "Manager1.SetDebug as root succeeds"
+texec "$CLIENT" call-void "$BUS" /org/finit/manager \
+    org.finit.Manager1 SetDebug >/dev/null \
+    || fail "SetDebug returned non-zero"
+# Toggle back so this test leaves debug in the same state we found it
+texec "$CLIENT" call-void "$BUS" /org/finit/manager \
+    org.finit.Manager1 SetDebug >/dev/null || true
+assert "SetDebug round-trip ok" 0 -eq 0
+
+say "Manager1.SetDebug from non-root is rejected with AccessDenied"
+set +e
+texec "$CLIENT" call-void-as-uid 1 "$BUS" /org/finit/manager \
+    org.finit.Manager1 SetDebug >/tmp/dbus-setdbg.out 2>&1
+sdbg_rc=$?
+set -e
+assert "Non-root SetDebug rejected (rc=$sdbg_rc)" "$sdbg_rc" -eq 1
+case "$(cat /tmp/dbus-setdbg.out)" in
+    *AccessDenied*) assert "SetDebug authz fires" 0 -eq 0 ;;
+    *) fail "Unexpected reply: $(cat /tmp/dbus-setdbg.out)" ;;
+esac
+
+# Suspend would actually suspend the test sysroot if it succeeded -- so
+# we only test the non-root rejection path, which fails before suspend()
+# is called.
+say "Manager1.Suspend from non-root is rejected with AccessDenied"
+set +e
+texec "$CLIENT" call-void-as-uid 1 "$BUS" /org/finit/manager \
+    org.finit.Manager1 Suspend >/tmp/dbus-susp.out 2>&1
+susp_rc=$?
+set -e
+assert "Non-root Suspend rejected (rc=$susp_rc)" "$susp_rc" -eq 1
+case "$(cat /tmp/dbus-susp.out)" in
+    *AccessDenied*) assert "Suspend authz fires" 0 -eq 0 ;;
+    *) fail "Unexpected reply: $(cat /tmp/dbus-susp.out)" ;;
+esac
+
+say "initctl runlevel reads via Properties.Get when D-Bus available"
+# runlevel output format is "<prev> <curr>", e.g. "N 2".  Just check
+# we get a sensible two-token line.
+rl=$(texec initctl runlevel)
+case "$rl" in
+    [N0-9S]\ [0-9S])
+        assert "initctl runlevel returned '$rl'" 0 -eq 0 ;;
+    *)
+        fail "Unexpected initctl runlevel output: $rl" ;;
+esac
