@@ -19,10 +19,7 @@ concurrency:
 
 jobs:
   fuzz:
-    # The message parser is the only place bytes off a socket become
-    # pointers, so give it a real fuzzer on every PR, not just the
-    # fixed sweep 'make check' runs.
-    name: fuzz msg-parse
+    name: fuzz
     runs-on: ubuntu-latest
     if: github.event_name != 'push' || github.ref == 'refs/heads/master'
     steps:
@@ -40,7 +37,7 @@ jobs:
           (cd libuev-2.4.1 && ./configure && make -j9 && sudo make install-strip)
           (cd libite-2.6.2 && ./configure && make -j9 && sudo make install-strip)
           sudo ldconfig
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: |
           ./autogen.sh
@@ -55,7 +52,7 @@ jobs:
       # private to it, so the corpus that accumulates on master is what
       # pull requests start from, rather than nothing.
       - name: Restore corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .fuzz-corpus
           key: fuzz-corpus-${{ github.run_id }}
@@ -77,7 +74,7 @@ jobs:
           echo "corpus: $(ls .fuzz-corpus | wc -l) inputs"
       - name: Upload crashers
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashers
           path: |
@@ -110,7 +107,7 @@ jobs:
           (cd libuev-2.4.1 && ./configure && make -j9 && sudo make install-strip)
           (cd libite-2.6.2 && ./configure && make -j9 && sudo make install-strip)
           sudo ldconfig
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Static Finit
         run: |
           ./autogen.sh
@@ -148,7 +145,7 @@ jobs:
           make -j1 check || (cat test/test-suite.log; false)
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: finit-test-${{ matrix.compiler }}
           path: test/*.log
