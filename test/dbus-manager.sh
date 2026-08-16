@@ -137,3 +137,49 @@ case "$rl" in
     *)
         fail "Unexpected initctl runlevel output: $rl" ;;
 esac
+
+# ---------- legacy-parity edge semantics ----------
+
+say "Manager1.SetRunlevel with bogus level returns InvalidArgs"
+set +e
+texec "$CLIENT" call-u "$BUS" /org/finit/manager \
+    org.finit.Manager1 SetRunlevel 42 >/tmp/dbus-rl.out 2>&1
+rl_rc=$?
+set -e
+assert "Bogus runlevel rejected (rc=$rl_rc)" "$rl_rc" -eq 1
+case "$(cat /tmp/dbus-rl.out)" in
+    *InvalidArgs*) assert "Error is InvalidArgs" 0 -eq 0 ;;
+    *) fail "Unexpected reply: $(cat /tmp/dbus-rl.out)" ;;
+esac
+
+say "Manager1.Signal on a stopped service returns Failed"
+cat >> "$SYSROOT$FINIT_CONF" <<CONF
+service stopped-serv {
+    manual  = true
+    command = "serv -np"
+}
+CONF
+run "initctl reload"
+set +e
+texec "$CLIENT" call-su "$BUS" /org/finit/manager \
+    org.finit.Manager1 Signal stopped-serv 1 >/tmp/dbus-sig.out 2>&1
+sig_rc=$?
+set -e
+assert "Signal to stopped service rejected (rc=$sig_rc)" "$sig_rc" -eq 1
+case "$(cat /tmp/dbus-sig.out)" in
+    *Failed*) assert "Error is Failed" 0 -eq 0 ;;
+    *) fail "Unexpected reply: $(cat /tmp/dbus-sig.out)" ;;
+esac
+
+# Reboot cannot be invoked without shutting down the sandbox, so
+# verify the timeout argument via introspection instead.
+say "Reboot family declares the timeout argument in introspection"
+flat=$(printf '%s' "$xml" | tr -d '\n')
+for m in Reboot Poweroff Halt; do
+    case "$flat" in
+        *"<method name=\"$m\">      <arg type=\"u\" direction=\"in\"/>"*)
+            assert "$m takes (u)" 0 -eq 0 ;;
+        *)
+            fail "$m does not declare the timeout argument" ;;
+    esac
+done

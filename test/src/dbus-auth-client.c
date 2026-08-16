@@ -322,6 +322,40 @@ static int mode_call_s(int argc, char *argv[])
 	return do_call(argv[2], argv[3], argv[4], argv[5], argv[6]);
 }
 
+/* "u" and "su" variants for methods taking a uint32 argument */
+static int do_call_u(const char *sock, const char *obj, const char *iface,
+		     const char *method, const char *arg, uint32_t val)
+{
+	link_client_t *c;
+	int rc;
+
+	c = link_client_open(sock);
+	if (!c) return 2;
+
+	rc = arg
+		? link_client_call_v(c, obj, iface, method, "su", arg, val)
+		: link_client_call_v(c, obj, iface, method, "u", val);
+	rc = report_rc(c, rc);
+	if (rc == 0)
+		printf("OK\n");
+	link_client_close(c);
+	return rc;
+}
+
+static int mode_call_u(int argc, char *argv[])
+{
+	if (argc != 7) return 2;
+	return do_call_u(argv[2], argv[3], argv[4], argv[5], NULL,
+			 (uint32_t)strtoul(argv[6], NULL, 0));
+}
+
+static int mode_call_su(int argc, char *argv[])
+{
+	if (argc != 8) return 2;
+	return do_call_u(argv[2], argv[3], argv[4], argv[5], argv[6],
+			 (uint32_t)strtoul(argv[7], NULL, 0));
+}
+
 static int mode_call_void(int argc, char *argv[])
 {
 	if (argc != 6) return 2;
@@ -513,6 +547,8 @@ int main(int argc, char *argv[])
 	if (!strcmp(argv[1], "introspect"))       return mode_introspect      (argc, argv);
 	if (!strcmp(argv[1], "liststrings"))      return mode_liststrings     (argc, argv);
 	if (!strcmp(argv[1], "call-s"))           return mode_call_s          (argc, argv);
+	if (!strcmp(argv[1], "call-u"))           return mode_call_u          (argc, argv);
+	if (!strcmp(argv[1], "call-su"))          return mode_call_su         (argc, argv);
 	if (!strcmp(argv[1], "call-void"))        return mode_call_void       (argc, argv);
 	if (!strcmp(argv[1], "call-s-as-uid"))    return mode_call_s_as_uid   (argc, argv);
 	if (!strcmp(argv[1], "call-void-as-uid")) return mode_call_void_as_uid(argc, argv);
