@@ -2,7 +2,7 @@
 .\" First parameter, NAME, should be all caps
 .\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
 .\" other parameters are allowed: see man(7), man(1)
-.Dd Jan 29, 2026
+.Dd Aug 16, 2026
 .\" Please adjust this date whenever revising the manpage.
 .Dt KEVENTD 8 SMM
 .Os Linux
@@ -17,6 +17,10 @@
 .Op Fl G
 .Op Fl h
 .Op Fl n
+.Op Fl p
+.Op Fl r Ar dir
+.Op Fl S
+.Op Fl t Ar sec
 .Op Fl v
 .Sh DESCRIPTION
 .Nm
@@ -25,7 +29,15 @@ is a built-in device manager bundled with
 It listens for kernel uevents on a
 .Dv NETLINK_KOBJECT_UEVENT
 socket and handles device node creation, persistent symlinks, firmware
-loading, kernel module loading, and condition management.
+loading, kernel module loading, and condition management.  Events are
+matched against udev rules read from
+.Pa /lib/udev/rules.d ,
+.Pa /run/udev/rules.d ,
+and
+.Pa /etc/udev/rules.d ,
+and device properties are persisted to
+.Pa /run/udev/data
+in the format libudev consumers expect.
 .Pp
 It replaces the need for external device managers like
 .Nm mdev ,
@@ -73,6 +85,20 @@ below.
 .It Fl n
 Run in foreground, do not daemonize.  Log messages are written to
 stderr instead of syslog.
+.It Fl p
+Passive mode: monitor power supply events only, leaving device
+management to an external device manager.
+.It Fl r Ar dir
+Extra udev rules directory, searched after the standard paths.
+.It Fl S
+Settle: wait until the device event queue is quiet, then exit 0, or
+non-zero on timeout.  Asks the running
+.Nm
+over D-Bus when available, else polls the kernel's uevent sequence
+counter.
+.It Fl t Ar sec
+Settle timeout in seconds, default 30.  Only with
+.Fl S .
 .It Fl v
 Show version and exit.
 .El
@@ -215,6 +241,21 @@ service cron {
     command     = "cron -f"
 }
 .Ed
+.Ss Class and Driver Conditions
+Devices without a
+.Pa /dev
+node are covered by
+.Cm class/<subsystem>/<name> ,
+asserted on every sysfs class device add, e.g.\&
+.Cm class/leds/blue
+or
+.Cm class/net/eth0 .
+.Cm driver/<name>
+is asserted while the driver
+.Ar name
+is bound to at least one device, from the kernel's bind/unbind
+uevents, e.g.\&
+.Cm driver/mt7530 .
 .Sh D-BUS INTERFACE
 With D-Bus support,
 .Nm
@@ -283,6 +324,8 @@ See also:
 .Lk https://skarnet.org/software/mdevd/ "mdevd" .
 .Sh SIGNALS
 .Bl -tag -width SIGUSR1
+.It Dv SIGHUP
+Re-read the udev rules directories.
 .It Dv SIGUSR1
 Toggle debug logging at runtime.
 .It Dv SIGTERM
@@ -300,9 +343,20 @@ Persistent input device symlinks.
 .It Pa /lib/firmware/
 Firmware search path.
 .It Pa /run/finit/cond/dev/
-Device condition symlinks.
+Device condition symlinks, also
+.Pa class/
+and
+.Pa driver/ .
 .It Pa /run/finit/cond/sys/pwr/
 Power supply condition symlinks.
+.It Pa /lib/udev/rules.d/ , Pa /run/udev/rules.d/ , Pa /etc/udev/rules.d/
+udev rules, searched in this order.
+.It Pa /run/udev/data/
+Per-device property database, libudev compatible.
+.It Pa /run/keventd/bus
+The
+.Cm org.finit.Device1
+D-Bus socket.
 .El
 .Sh SEE ALSO
 .Xr finit 8 ,
