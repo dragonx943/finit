@@ -160,6 +160,8 @@ int             firmware_load    (struct uevent *ev);
 int             modprobe_load    (const char *modalias);
 
 int             coldplug         (void);
+int             coldplug_trigger (const char *action, const char *subsys_glob);
+int             uevent_action_valid(const char *action);
 
 #endif /* FINIT_KEVENTD_H_ */
 

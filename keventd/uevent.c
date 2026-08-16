@@ -52,6 +52,7 @@
 
 #include "keventd.h"
 #include "cond.h"
+#include "sysfs.h"
 #include "util.h"
 
 /* Forward declarations */
@@ -1154,8 +1155,13 @@ int modprobe_load(const char *modalias)
 
 /*
  * Coldplug callback for nftw().
- * Writes "add" to each uevent file to trigger kernel to resend events.
+ * Writes the requested action to each matching uevent file to trigger
+ * the kernel to resend events.  nftw() has no user cookie, so the
+ * action and subsystem filter ride in file statics.
  */
+static const char *trigger_action = "add";
+static const char *trigger_glob;
+
 static int coldplug_cb(const char *path, const struct stat *st,
 		       int type, struct FTW *ftw)
 {
@@ -1175,10 +1181,48 @@ static int coldplug_cb(const char *path, const struct stat *st,
 	if (strcmp(path + len - 6, "uevent"))
 		return 0;
 
-	/* Trigger add event */
-	fnwrite("add", "%s", path);
+	if (trigger_glob) {
+		char syspath[PATH_MAX];
+		char subsys[64];
+
+		/* Strip "/uevent" to get the device directory */
+		snprintf(syspath, sizeof(syspath), "%.*s",
+			 (int)(len - 7), path);
+		if (sysfs_read_subsystem(syspath, subsys, sizeof(subsys)) < 0 ||
+		    fnmatch(trigger_glob, subsys, 0))
+			return 0;
+	}
+
+	fnwrite((char *)trigger_action, "%s", path);
 
 	return 0;
+}
+
+/*
+ * Replay device events, optionally scoped: NULL/empty glob matches
+ * every subsystem.  Serves both boot-time coldplug and the D-Bus
+ * Trigger method.
+ */
+int coldplug_trigger(const char *action, const char *subsys_glob)
+{
+	int rc;
+
+	trigger_action = action && *action ? action : "add";
+	trigger_glob   = subsys_glob && *subsys_glob ? subsys_glob : NULL;
+
+	logit(LOG_INFO, "Triggering %s events%s%s ...", trigger_action,
+	      trigger_glob ? " for subsystem " : "", trigger_glob ?: "");
+
+	rc = nftw("/sys/devices", coldplug_cb, 64, FTW_PHYS);
+	if (rc < 0)
+		logit(LOG_ERR, "Trigger failed: %s", strerror(errno));
+	else
+		logit(LOG_INFO, "Trigger complete");
+
+	trigger_action = "add";
+	trigger_glob   = NULL;
+
+	return rc < 0 ? -1 : 0;
 }
 
 /*
@@ -1186,16 +1230,12 @@ static int coldplug_cb(const char *path, const struct stat *st,
  */
 int coldplug(void)
 {
-	logit(LOG_INFO, "Starting coldplug...");
+	return coldplug_trigger("add", NULL);
+}
 
-	/* Walk /sys/devices and trigger uevents */
-	if (nftw("/sys/devices", coldplug_cb, 64, FTW_PHYS) < 0) {
-		logit(LOG_ERR, "Coldplug failed: %s", strerror(errno));
-		return -1;
-	}
-
-	logit(LOG_INFO, "Coldplug complete");
-	return 0;
+int uevent_action_valid(const char *action)
+{
+	return action && parse_action(action) != ACT_UNKNOWN;
 }
 
 /**
