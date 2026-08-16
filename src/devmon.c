@@ -58,6 +58,30 @@ static struct dev_node *find_node(const char *cond)
 	return NULL;
 }
 
+static int devmon_cond(const char *cond)
+{
+	return !strncmp(cond, COND_DEV,   strlen(COND_DEV))   ||
+	       !strncmp(cond, COND_CLASS, strlen(COND_CLASS)) ||
+	       !strncmp(cond, COND_DRIVER, strlen(COND_DRIVER));
+}
+
+/*
+ * keventd asserts class/ and driver/ conditions for devices that never
+ * get a /dev node, e.g. LEDs and DSA switch ports.  For those the
+ * condition file is the only record of the device.
+ */
+static int dev_exists(const char *cond)
+{
+	char path[PATH_MAX], tmp[PATH_MAX];
+
+	snprintf(path, sizeof(path), "/%s", cond);
+	if (fexist(path))
+		return 1;
+
+	snprintf(tmp, sizeof(tmp), _PATH_COND "%s", cond);
+	return fexist(pid_runpath(tmp, path, sizeof(path)));
+}
+
 static void drop_node(struct dev_node *node)
 {
 	if (!node)
@@ -75,9 +99,8 @@ static void drop_node(struct dev_node *node)
 void devmon_add_cond(const char *cond)
 {
 	struct dev_node *node;
-	char path[PATH_MAX];
 
-	if (!cond || strncmp(cond, "dev/", 4)) {
+	if (!cond || !devmon_cond(cond)) {
 //		dbg("no match %s", cond ?: "<NIL>");
 		return;
 	}
@@ -105,14 +128,13 @@ void devmon_add_cond(const char *cond)
 
 	TAILQ_INSERT_TAIL(&dev_node_list, node, link);
 
-	snprintf(path, sizeof(path), "/%s", cond);
-	if (fexist(path))
+	if (dev_exists(cond))
 		cond_set(cond);
 }
 
 void devmon_del_cond(const char *cond)
 {
-	if (!cond || strncmp(cond, COND_DEV, strlen(COND_DEV)))
+	if (!cond || !devmon_cond(cond))
 		return;
 
 	drop_node(find_node(cond));
@@ -121,11 +143,9 @@ void devmon_del_cond(const char *cond)
 void devmon_reconf(void)
 {
 	struct dev_node *node, *tmp;
-	char path[PATH_MAX];
 
 	TAILQ_FOREACH_SAFE(node, &dev_node_list, link, tmp) {
-		snprintf(path, sizeof(path), "/%s", node->name);
-		if (fexist(path))
+		if (dev_exists(node->name))
 			cond_set(node->name);
 		else
 			cond_clear(node->name);
@@ -161,6 +181,18 @@ static void devmon_update_conds(char *dir, char *name, uint32_t mask)
 	char *cond;
 
 	paste(fn, sizeof(fn), dir, name);
+
+	/*
+	 * Events in the condition tree come from keventd, the file is
+	 * the condition state so only kick affected services, like the
+	 * sys/usr plugins do.
+	 */
+	cond = strstr(fn, COND_BASE);
+	if (cond) {
+		cond_update(cond + strlen(COND_BASE) + 1);
+		return;
+	}
+
 	cond = &fn[1];
 
 //	dbg("path: %s, mask: %08x, cond: %s", fn, mask, cond);
@@ -273,21 +305,28 @@ static void devmon_cb(uev_t *w, void *arg, int events)
 
 void devmon_init(uev_ctx_t *ctx)
 {
+	const char *cond_dirs[] = { _PATH_CONDDEV, _PATH_CONDCLASS, _PATH_CONDDRIVER };
 	char dir[MAX_ARG_LEN];
+	size_t i;
 
 	fd = iwatch_init(&iw_devmon);
 	if (fd < 0)
 		return;
 
-	if (mkpath(pid_runpath(_PATH_CONDDEV, dir, sizeof(dir)), 0755) && errno != EEXIST) {
-		err(1, "Failed creating %s condition directory, %s", COND_DEV, _PATH_CONDDEV);
-		return;
-	}
-
 	if (uev_io_init(ctx, &devw, devmon_cb, NULL, fd, UEV_READ)) {
 		err(1, "Failed setting up I/O callback for /dev watcher");
 		close(fd);
 		return;
+	}
+
+	for (i = 0; i < NELEMS(cond_dirs); i++) {
+		pid_runpath(cond_dirs[i], dir, sizeof(dir));
+		if (mkpath(dir, 0755) && errno != EEXIST) {
+			err(1, "Failed creating condition directory %s", dir);
+			continue;
+		}
+
+		devmon_add_path(&iw_devmon, dir);
 	}
 
 	strlcpy(dir, _PATH_DEV, sizeof(dir));
