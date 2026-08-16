@@ -61,53 +61,19 @@ static int call(int (*action)(svc_t *, void *), char *buf, size_t len)
 static int stop(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-
-	if (!svc)
-		return 1;
-
-	service_timeout_cancel(svc);
-	svc_stop(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-
-	return 0;
+	return service_stop_now(svc);
 }
 
 static int start(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-
-	if (!svc)
-		return 1;
-
-	service_timeout_cancel(svc);
-	svc_start(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-
-	return 0;
+	return service_start_now(svc);
 }
 
-/*
- * NOTE: this does not wait for svc to be stopped first, that is the
- *       responsibility of initctl to do.  Otherwise we'd block PID 1,
- *       or introduce some nasty race conditions.
- */
 static int restart(svc_t *svc, void *user_data)
 {
-	if (!svc)
-		return 1;
-
-	if (!svc_is_running(svc))
-		return start(svc, user_data);
-
-	service_timeout_cancel(svc);
-	service_stop(svc);
-	service_step(svc);
-
-	return 0;
+	(void)user_data;
+	return service_restart_now(svc);
 }
 
 static int reload(svc_t *svc, void *user_data)

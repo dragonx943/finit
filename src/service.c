@@ -1443,6 +1443,77 @@ int service_stop(svc_t *svc)
 }
 
 /**
+ * service_stop_now - Stop a service on user request
+ * @svc: Service to stop
+ *
+ * Shared by the legacy API and the D-Bus methods, like
+ * service_reload().
+ *
+ * Returns:
+ * POSIX OK(0) on success, non-zero if @svc is NULL.
+ */
+int service_stop_now(svc_t *svc)
+{
+	if (!svc)
+		return 1;
+
+	service_timeout_cancel(svc);
+	svc_stop(svc);
+	service_step(svc);
+	if (!IS_RESERVED_RUNLEVEL(runlevel))
+		service_step_all(SVC_TYPE_ANY);
+
+	return 0;
+}
+
+/**
+ * service_start_now - Start a service on user request
+ * @svc: Service to start
+ *
+ * Returns:
+ * POSIX OK(0) on success, non-zero if @svc is NULL.
+ */
+int service_start_now(svc_t *svc)
+{
+	if (!svc)
+		return 1;
+
+	service_timeout_cancel(svc);
+	svc_start(svc);
+	service_step(svc);
+	if (!IS_RESERVED_RUNLEVEL(runlevel))
+		service_step_all(SVC_TYPE_ANY);
+
+	return 0;
+}
+
+/**
+ * service_restart_now - Restart a service on user request
+ * @svc: Service to restart
+ *
+ * Does not wait for @svc to stop first, that is the caller's
+ * (initctl) responsibility.  Otherwise we'd block PID 1, or
+ * introduce some nasty race conditions.
+ *
+ * Returns:
+ * POSIX OK(0) on success, non-zero if @svc is NULL.
+ */
+int service_restart_now(svc_t *svc)
+{
+	if (!svc)
+		return 1;
+
+	if (!svc_is_running(svc))
+		return service_start_now(svc);
+
+	service_timeout_cancel(svc);
+	service_stop(svc);
+	service_step(svc);
+
+	return 0;
+}
+
+/**
  * service_reload - Request reload of a service, driven by the state machine
  * @svc: Service to reload
  *

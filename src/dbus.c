@@ -314,46 +314,24 @@ static int manager_get_service(link_call_t *call, void *userdata)
 	return 0;
 }
 
-/* Service-control helpers used by Start/Stop/Restart/Reload.  These
- * mirror the static helpers in api.c — kept private here so api.c
- * stays untouched in this increment. */
+/* svc_parse_jobstr-style adapters over the shared service helpers */
 
 static int dbus_apply_stop(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-	if (!svc)
-		return 1;
-	service_timeout_cancel(svc);
-	svc_stop(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-	return 0;
+	return service_stop_now(svc);
 }
 
 static int dbus_apply_start(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-	if (!svc)
-		return 1;
-	service_timeout_cancel(svc);
-	svc_start(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-	return 0;
+	return service_start_now(svc);
 }
 
 static int dbus_apply_restart(svc_t *svc, void *user_data)
 {
-	if (!svc)
-		return 1;
-	if (!svc_is_running(svc))
-		return dbus_apply_start(svc, user_data);
-	service_timeout_cancel(svc);
-	service_stop(svc);
-	service_step(svc);
-	return 0;
+	(void)user_data;
+	return service_restart_now(svc);
 }
 
 struct dispatch_ctx {
@@ -685,18 +663,15 @@ static int service1_start  (link_call_t *c, void *u) { return service_action_met
 static int service1_stop   (link_call_t *c, void *u) { return service_action_method(c, u, dbus_apply_stop);    }
 static int service1_restart(link_call_t *c, void *u) { return service_action_method(c, u, dbus_apply_restart); }
 
-static int service1_reload(link_call_t *call, void *userdata)
+static int dbus_apply_reload(svc_t *svc, void *user_data)
 {
-	svc_t *svc = userdata;
+	(void)user_data;
+	return service_reload(svc);
+}
 
-	if (!svc)
-		return link_call_reply_error(call,
-			"org.finit.Error.NoSuchService",
-			"Service object no longer valid");
-
-	service_reload(svc);
-	(void)link_call_reply(call);
-	return 0;
+static int service1_reload(link_call_t *c, void *u)
+{
+	return service_action_method(c, u, dbus_apply_reload);
 }
 
 static const link_method_t service_methods[] = {
