@@ -106,7 +106,7 @@ static int is_initramfs(void)
 /*
  * Move a mount point from oldpath to newpath under newroot
  */
-static int do_move_mount(const char *oldpath, const char *newroot)
+static int do_move_mount(const char *oldpath, const char *newroot, dev_t rootdev)
 {
 	char newpath[PATH_MAX];
 	struct stat st;
@@ -114,13 +114,22 @@ static int do_move_mount(const char *oldpath, const char *newroot)
 	if (stat(oldpath, &st))
 		return 0;		/* Not mounted, skip */
 
+	/*
+	 * stat() succeeds on plain directories too, only a device
+	 * differing from / marks a mount point.  Cannot use fismnt()
+	 * here since /proc may already have moved.
+	 */
+	if (st.st_dev == rootdev)
+		return 0;		/* Not a mount point, skip */
+
 	snprintf(newpath, sizeof(newpath), "%s%s", newroot, oldpath);
 
 	/* Create target directory if needed */
 	makedir(newpath, 0755);
 
 	if (mount(oldpath, newpath, NULL, MS_MOVE, NULL)) {
-		dbg("Failed to move %s to %s: %s", oldpath, newpath, strerror(errno));
+		logit(LOG_ERR, "switch_root: failed to move %s to %s: %s",
+		      oldpath, newpath, strerror(errno));
 		return -1;
 	}
 
@@ -243,6 +252,28 @@ int switch_root_precheck(const char *newroot, const char *newinit,
 }
 
 /*
+ * Past the point of no return: services are dead and the API socket
+ * is gone, so failures cannot be reported back to anyone.  Same deal
+ * as a fatal fsck() at boot: drop to a maintenance shell, sulogin(1)
+ * reboots when it exits.
+ */
+static int __attribute__ ((format (printf, 1, 2)))
+switch_root_rescue(const char *fmt, ...)
+{
+	char msg[128];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+
+	logit(LOG_CONSOLE | LOG_ALERT, "switch_root: %s, attempting sulogin ...", msg);
+	sulogin(1);
+
+	return -1;		/* not reached, sulogin(1) reboots */
+}
+
+/*
  * Perform switch_root to a new root filesystem
  *
  * This function does not return on success - it exec's the new init.
@@ -251,6 +282,7 @@ int switch_root_precheck(const char *newroot, const char *newinit,
 int switch_root(const char *newroot, const char *newinit)
 {
 	struct stat oldroot_st;
+	int failed = 0;
 	int console_fd;
 	dev_t rootdev;
 	int signo;
@@ -263,10 +295,11 @@ int switch_root(const char *newroot, const char *newinit)
 	if (!newinit || !newinit[0])
 		newinit = "/sbin/init";
 
-	/* Needed below for the initramfs cleanup */
+	/* Needed below for the moves and the initramfs cleanup */
 	if (stat("/", &oldroot_st))
 		return switch_root_fail(NULL, 0, errno,
 					"cannot stat /: %s", strerror(errno));
+	rootdev = oldroot_st.st_dev;
 
 	logit(LOG_NOTICE, "Performing switch_root to %s, init %s", newroot, newinit);
 
@@ -298,42 +331,50 @@ int switch_root(const char *newroot, const char *newinit)
 	plugin_exit();
 	cond_exit();
 
-	/* Move virtual filesystems to new root */
+	/*
+	 * Unblock signals already here, before the rescue paths in
+	 * switch_root_rescue() can trigger, so a maintenance shell
+	 * does not inherit our blocked signal mask.
+	 */
+	sig_unblock();
+
+	/*
+	 * Move virtual filesystems to new root.  Try all four even if
+	 * one fails, so a bad /dev doesn't also skip /proc, /sys and
+	 * /run.  Each failure is logged by do_move_mount() itself.
+	 */
 	dbg("Moving virtual filesystems...");
-	do_move_mount("/dev", newroot);
-	do_move_mount("/proc", newroot);
-	do_move_mount("/sys", newroot);
-	do_move_mount("/run", newroot);
+	failed |= do_move_mount("/dev", newroot, rootdev);
+	failed |= do_move_mount("/proc", newroot, rootdev);
+	failed |= do_move_mount("/sys", newroot, rootdev);
+	failed |= do_move_mount("/run", newroot, rootdev);
+	if (failed)
+		return switch_root_rescue("failed to move virtual filesystems");
 
 	/* Change to new root directory */
-	if (chdir(newroot)) {
-		err(1, "Failed to chdir to %s", newroot);
-		return -1;
-	}
+	if (chdir(newroot))
+		return switch_root_rescue("failed to chdir to %s: %s",
+					  newroot, strerror(errno));
 
 	/* Delete contents of old root if we're on initramfs */
-	rootdev = oldroot_st.st_dev;
 	if (is_initramfs()) {
 		dbg("Deleting initramfs contents...");
 		delete_initramfs_contents(rootdev, newroot);
 	}
 
 	/* Mount --move newroot to / */
-	if (mount(newroot, "/", NULL, MS_MOVE, NULL)) {
-		err(1, "Failed to move %s to /", newroot);
-		return -1;
-	}
+	if (mount(newroot, "/", NULL, MS_MOVE, NULL))
+		return switch_root_rescue("failed to move %s to /: %s",
+					  newroot, strerror(errno));
 
 	/* chroot to new root */
-	if (chroot(".")) {
-		err(1, "Failed to chroot to new root");
-		return -1;
-	}
+	if (chroot("."))
+		return switch_root_rescue("failed to chroot to new root: %s",
+					  strerror(errno));
 
-	if (chdir("/")) {
-		err(1, "Failed to chdir to /");
-		return -1;
-	}
+	if (chdir("/"))
+		return switch_root_rescue("failed to chdir to /: %s",
+					  strerror(errno));
 
 	/* Reopen console in new root.  dup2() closes the old fds itself,
 	 * so open() returns a fd > STDERR_FILENO that we can always close. */
@@ -345,16 +386,12 @@ int switch_root(const char *newroot, const char *newinit)
 		close(console_fd);
 	}
 
-	/* Reset signals to default */
-	sig_unblock();
-
 	/* Exec the new init - this does not return on success */
 	dbg("Executing %s...", newinit);
 	execl(newinit, newinit, NULL);
 
-	/* If we get here, exec failed */
-	err(1, "Failed to exec %s", newinit);
-	return -1;
+	return switch_root_rescue("failed to exec %s: %s",
+				  newinit, strerror(errno));
 }
 
 /**

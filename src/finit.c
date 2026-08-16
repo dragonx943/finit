@@ -122,7 +122,7 @@ static void banner(void)
 #endif
 }
 
-static int sulogin(int do_reboot)
+int sulogin(int do_reboot)
 {
 	int rc = EX_OSFILE;
 	char *cmd[] = {
