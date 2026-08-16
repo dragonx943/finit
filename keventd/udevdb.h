@@ -58,6 +58,11 @@ int  udevdb_read   (struct uevent *ev);
 int  udevdb_read_parent (struct uevent *ev);
 
 /*
+ * Like udevdb_read(), for any devpath, keyed from sysfs.
+ */
+int  udevdb_read_devpath(const char *devpath, struct uevent *ev);
+
+/*
  * Delete a device's database entry on ACT_REMOVE.
  */
 void udevdb_delete (const struct uevent *ev);

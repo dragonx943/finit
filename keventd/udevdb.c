@@ -179,27 +179,26 @@ int udevdb_read(struct uevent *ev)
  * IMPORT{parent} in the rules engine.  The parent has no uevent to key
  * from, so its device ID is composed from sysfs (see udevdb_path()).
  */
-int udevdb_read_parent(struct uevent *ev)
+/*
+ * Read E: records for any devpath, keyed from its sysfs attributes:
+ * the device has no uevent in hand, so major:minor, ifindex, and
+ * subsystem come from /sys.  Serves IMPORT{parent} and the D-Bus
+ * Info method.
+ */
+int udevdb_read_devpath(const char *devpath, struct uevent *ev)
 {
-	char ppath[PATH_MAX], syspath[PATH_MAX], dbfile[PATH_MAX];
+	char syspath[PATH_MAX], dbfile[PATH_MAX];
 	char subsys[64] = "unknown";
 	char attr[64];
 	const char *sn;
-	char *slash;
 
-	if (!ev->devpath)
+	if (!devpath || *devpath != '/')
 		return -1;
 
-	snprintf(ppath, sizeof(ppath), "%s", ev->devpath);
-	slash = strrchr(ppath, '/');
-	if (!slash || slash == ppath)
-		return -1;
-	*slash = 0;
+	sn = strrchr(devpath, '/');
+	sn = sn ? sn + 1 : devpath;
 
-	sn = strrchr(ppath, '/');
-	sn = sn ? sn + 1 : ppath;
-
-	snprintf(syspath, sizeof(syspath), "/sys%s", ppath);
+	snprintf(syspath, sizeof(syspath), "/sys%s", devpath);
 	sysfs_read_subsystem(syspath, subsys, sizeof(subsys));
 
 	snprintf(dbfile, sizeof(dbfile), "%s/dev", syspath);
@@ -217,6 +216,23 @@ int udevdb_read_parent(struct uevent *ev)
 	}
 
 	return udevdb_load(dbfile, ev);
+}
+
+int udevdb_read_parent(struct uevent *ev)
+{
+	char ppath[PATH_MAX];
+	char *slash;
+
+	if (!ev->devpath)
+		return -1;
+
+	snprintf(ppath, sizeof(ppath), "%s", ev->devpath);
+	slash = strrchr(ppath, '/');
+	if (!slash || slash == ppath)
+		return -1;
+	*slash = 0;
+
+	return udevdb_read_devpath(ppath, ev);
 }
 
 /*
