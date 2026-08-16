@@ -83,6 +83,7 @@ EXTRA_DIST		+= dbus-service.sh
 EXTRA_DIST		+= dbus-cond.sh
 EXTRA_DIST		+= dbus-initctl.sh
 EXTRA_DIST		+= dbus-introspect.sh
+EXTRA_DIST		+= dbus-device.sh
 
 AM_TESTS_ENVIRONMENT	 = SYSROOT='$(abs_builddir)/sysroot/';
 AM_TESTS_ENVIRONMENT	+= export SYSROOT;
@@ -150,6 +151,9 @@ TESTS			+= dbus-service.sh
 TESTS			+= dbus-cond.sh
 TESTS			+= dbus-initctl.sh
 TESTS			+= dbus-introspect.sh
+if KEVENTD
+TESTS			+= dbus-device.sh
+endif
 TESTS			+= fuzz-msg-parse.sh
 # Needs the plugin to bring up the bus, not just the built-in one
 if BUILD_DBUS_PLUGIN
