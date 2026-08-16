@@ -246,7 +246,10 @@ static int read_string_like(struct link_reader *r, const char **out)
 
 	if (__r_u32(r, &len) < 0)
 		return -1;
-	if (r->off + (size_t)len + 1 > r->cap) {
+	/* Subtractive so a 0xffffffff length cannot wrap the sum past
+	 * the guard on a 32-bit size_t: off <= cap always holds, and
+	 * the string needs len content bytes plus a nul. */
+	if (len >= r->cap - r->off) {
 		r->err = 1;
 		return -1;
 	}
@@ -364,16 +367,15 @@ int __r_align(struct link_reader *r, size_t n)
 int __r_array_begin(struct link_reader *r, size_t *out_end)
 {
 	uint32_t array_bytes;
-	size_t   end;
 
 	if (__r_u32(r, &array_bytes) < 0)
 		return -1;
-	end = r->off + (size_t)array_bytes;
-	if (end > r->cap) {
+	/* Subtractive, see read_string_like(): off <= cap always. */
+	if (array_bytes > r->cap - r->off) {
 		r->err = 1;
 		return -1;
 	}
-	*out_end = end;
+	*out_end = r->off + (size_t)array_bytes;
 	return 0;
 }
 

@@ -52,6 +52,21 @@ the uev event loop bridge.  `initctl` uses the client half of the same
 library, so one wire-format implementation serves both ends.  If libink
 is ever spun out, that file is the cut line.
 
+Future work
+-----------
+
+Privileged methods over the *system* bus are root-only.  Finit learns
+the caller's uid from the broker with `GetConnectionUnixUser`, but that
+reply carries no group list, so it cannot honour `--with-group`
+membership there the way it does on the local bus (where the kernel
+hands over the group set via `SO_PEERGROUPS`).  Closing the gap means
+asking the broker `GetConnectionCredentials` and reading its
+`UnixGroupIDs`, which is a variant holding an `au` array — the reader
+(`marshal.c`) only decodes single-character variant signatures today,
+so it needs extending first.  Finit's own direct users reach it over
+the local bus, so this has not been pressing.
+
+
 Testing
 -------
 

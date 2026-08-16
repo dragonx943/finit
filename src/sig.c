@@ -338,6 +338,11 @@ void do_shutdown(shutop_t op)
 	/* We can no longer act on conditions, activate script runner */
 	cond_exit();
 
+#ifdef HAVE_DBUS
+	/* Close the bus: drop peers, free the server, unlink the socket. */
+	dbus_exit();
+#endif
+
 	/* Reap 'em */
 	while (waitpid(-1, NULL, WNOHANG) > 0)
 		;

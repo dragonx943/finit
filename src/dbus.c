@@ -31,9 +31,6 @@
 #ifdef HAVE_DBUS
 
 #include <errno.h>
-#include <grp.h>
-#include <limits.h>
-#include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
@@ -138,9 +135,12 @@ static void expire_sweep(void *arg)
 	(void)arg;
 	expire_armed = 0;
 
-	/* _SAFE because expiring a call runs its callback, and a
-	 * callback that ends up writing to a peer can drop it, which
-	 * unlinks it from this very list. */
+	/* Expiring a call runs its callback, which may drop the peer it
+	 * belongs to; _SAFE keeps this loop walking when that peer is
+	 * `p`.  It does NOT cover a callback that drops a *different*
+	 * peer, which would unlink our saved `tmp` -- no path does that
+	 * today (the only callback here denies on the same connection),
+	 * and if one ever does it must not free from under the sweep. */
 	TAILQ_FOREACH_SAFE(p, &peers, link, tmp) {
 		if (!p->dead)
 			live += link_connection_expire(p->conn, DBUS_CALL_TIMEOUT_MS);
@@ -1292,49 +1292,33 @@ void dbus_notify_condition_change(const char *name, const char *state)
  * the same thing, rather than the socket admitting the wheel group and
  * every method turning it away.
  *
- * On the local bus the kernel already made this decision at connect(),
- * supplementary groups and all, so the lookup only confirms it.  The
- * system bus has no socket mode to lean on, which is why we ask here
- * rather than trusting the connection.
+ * The group set is the caller's own, captured by libink from the kernel
+ * (SO_PEERCRED + SO_PEERGROUPS) at connect, so this never asks NSS --
+ * getpwuid/getgrouplist can block on a slow LDAP/SSSD backend, and PID 1
+ * must never block.  The owning group's gid is resolved once, at init.
  *
- * Deliberately uncached: /etc/group changes while Finit runs, and a
- * privileged call is an operator action, not a hot path.
+ * A caller reaching us through a broker carries no group set (libink
+ * passes ngroups 0), so system-bus privileged methods are root-only.
+ * The wheel group acts over the local bus, which is where initctl and
+ * operators connect.  See libink/README.md for lifting that limit.
  */
-static int caller_is_privileged(uid_t uid, void *userdata)
+static gid_t privileged_gid = (gid_t)-1;	/* DEFGROUP, resolved at init */
+
+static int caller_is_privileged(uid_t uid, const gid_t *groups, int ngroups,
+				void *userdata)
 {
 	(void)userdata;
 
 	if (uid == 0)
 		return 1;
 
-	/* Group membership comes from NSS, which the C library loads
-	 * with dlopen(), so a build meant to link statically cannot
-	 * count on it.  Compiled out rather than left to fail open:
-	 * root only there, see doc/dbus.md. */
-#ifndef ENABLE_STATIC
-	{
-		gid_t groups[NGROUPS_MAX];
-		int   ngroups = NGROUPS_MAX;
-		struct passwd *pw;
-		int    gid, i;
+	if (privileged_gid == (gid_t)-1)
+		return 0;	/* no owning group to match against */
 
-		gid = getgroup(DEFGROUP);
-		if (gid < 0)
-			return 0;
-
-		pw = getpwuid(uid);
-		if (!pw)
-			return 0;
-
-		if (getgrouplist(pw->pw_name, pw->pw_gid, groups, &ngroups) < 0)
-			return 0;
-
-		for (i = 0; i < ngroups; i++) {
-			if (groups[i] == (gid_t)gid)
-				return 1;
-		}
+	for (int i = 0; i < ngroups; i++) {
+		if (groups[i] == privileged_gid)
+			return 1;
 	}
-#endif
 
 	return 0;
 }
@@ -1641,7 +1625,10 @@ int dbus_init(uev_ctx_t *ctx)
 		return 1;
 	}
 
-	if (chown(FINIT_BUS_SOCKET, geteuid(), getgroup(DEFGROUP)))
+	/* Resolve the owning group once: the authorizer matches callers
+	 * against it on every privileged call and must not hit NSS then. */
+	privileged_gid = getgroup(DEFGROUP);
+	if (chown(FINIT_BUS_SOCKET, geteuid(), privileged_gid))
 		err(1, "Failed setting group %s on %s", DEFGROUP, FINIT_BUS_SOCKET);
 
 	link_server_set_authorizer(server, caller_is_privileged, NULL);

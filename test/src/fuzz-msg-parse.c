@@ -27,7 +27,7 @@
 #include "internal.h"
 
 #define FRAME_MAX      512
-#define HDR_FIXED_SIZE  16	/* must agree with proto.c */
+#define HDR_FIXED_SIZE  LINK_HDR_FIXED_SIZE	/* from proto.h, no drift */
 
 static void fail(const char *what, size_t size)
 {

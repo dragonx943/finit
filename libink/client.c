@@ -133,7 +133,7 @@ static int read_one(link_client_t *c, struct link_msg *msg)
 
 	memset(msg, 0, sizeof(*msg));
 
-	if (read_full(c->fd, c->rxbuf, 16) < 0)
+	if (read_full(c->fd, c->rxbuf, LINK_HDR_FIXED_SIZE) < 0)
 		return -1;
 	if (c->rxbuf[0] != 'l')
 		return -1;
@@ -154,12 +154,13 @@ static int read_one(link_client_t *c, struct link_msg *msg)
 	if (fields_len > sizeof(c->rxbuf) || body_len > sizeof(c->rxbuf))
 		return -1;
 
-	body_off = (uint32_t)ALIGN_UP(16u + fields_len, 8u);
+	body_off = (uint32_t)ALIGN_UP(LINK_HDR_FIXED_SIZE + fields_len, 8u);
 	total    = body_off + body_len;
-	if (total > sizeof(c->rxbuf) || total < 16)
+	if (total > sizeof(c->rxbuf) || total < LINK_HDR_FIXED_SIZE)
 		return -1;
 
-	if (read_full(c->fd, c->rxbuf + 16, total - 16) < 0)
+	if (read_full(c->fd, c->rxbuf + LINK_HDR_FIXED_SIZE,
+		      total - LINK_HDR_FIXED_SIZE) < 0)
 		return -1;
 	c->rxlen = total;
 

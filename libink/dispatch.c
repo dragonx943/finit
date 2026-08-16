@@ -526,12 +526,13 @@ int __dispatch_message(link_connection_t *conn, const struct link_msg *m, size_t
 
 /* Who may invoke a privileged method.  Without an authorizer, only
  * root, which is what libink can decide on its own. */
-static int caller_may(link_server_t *srv, uid_t uid)
+static int caller_may(link_server_t *srv, uid_t uid,
+		      const gid_t *groups, int ngroups)
 {
 	if (uid == LINK_UID_UNKNOWN)
 		return 0;
 	if (srv && srv->authorizer)
-		return srv->authorizer(uid, srv->authz_userdata);
+		return srv->authorizer(uid, groups, ngroups, srv->authz_userdata);
 
 	return uid == 0;
 }
@@ -610,8 +611,9 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 	 * state-changing built-in without first adding equivalent
 	 * authorisation inside __handle_builtin. */
 	rc = __handle_builtin(conn, m);
-	if (rc >= 0)
-		return rc;	/* 0 = handled OK, 1 = built-in but failed; <0 = not a built-in */
+	if (rc <= 0)
+		return rc;	/* 0 = handled & sent, -1 = send failed, drop */
+	/* rc == 1: not a built-in, fall through to the object tree. */
 
 	o = find_object(conn->server, m->path);
 	if (!o) {
@@ -667,7 +669,12 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 				call_uid = (uid_t)-1;
 		}
 
-		if (!caller_may(conn->server, call_uid)) {
+		/* Local peers carry a kernel-captured group set; a call
+		 * resolved over a broker carries only its uid, so the
+		 * authorizer sees no groups and falls back to root-only. */
+		if (!caller_may(conn->server, call_uid,
+				known_uid ? NULL : conn->peer_groups,
+				known_uid ? 0    : conn->peer_ngroups)) {
 			__dbg("denied %s, caller uid %d is not privileged",
 			      m->member, (int)call_uid);
 			return __send_error(conn, m,
@@ -683,22 +690,17 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 	__r_init(&call.read_cursor, m->body, m->body_avail);
 
 	rc = meth->handler(&call, e->userdata);
-	if (rc < 0 && !call.reply_consumed && !call.error_sent) {
-		/* Handler returned an error without sending one. */
-		__send_error(conn, m,
-				"org.freedesktop.DBus.Error.Failed",
-				"Handler failed");
-		return 0;
-	}
 
-	if (!call.reply_consumed && !call.error_sent) {
-		/* Handler returned 0 but never produced a reply; treat as
-		 * empty reply with out_sig "". */
-		__send_method_return(conn, m, NULL, NULL, 0);
-		return 0;
-	}
+	/* Every path returns the status of whatever it put on the wire,
+	 * so a failed send propagates out and the read loop drops the
+	 * peer rather than leaving a half-written frame on a live link.
+	 *
+	 * The handler sent its own reply or error: its return value is
+	 * that send's status. */
+	if (call.error_sent)
+		return rc;
 
-	if (call.reply_consumed && !call.error_sent) {
+	if (call.reply_consumed) {
 		blen = __w_finish(&call.reply_writer);
 		if (blen < 0)
 			return __send_error(conn, m,
@@ -708,5 +710,12 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 					       conn->txbuf, (size_t)blen);
 	}
 
-	return 0;
+	/* Nothing sent yet: a negative return becomes an error reply, a
+	 * zero return an empty method return. */
+	if (rc < 0)
+		return __send_error(conn, m,
+			"org.freedesktop.DBus.Error.Failed",
+			"Handler failed");
+
+	return __send_method_return(conn, m, NULL, NULL, 0);
 }

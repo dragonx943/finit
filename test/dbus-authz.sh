@@ -29,6 +29,10 @@ case "$allowed" in
     *)              fail "Unexpected reply for group member: $allowed" ;;
 esac
 
+# uid 2 is outside the group, so 0660 would stop it at connect; widen
+# the test socket so the refusal comes from the method, which is the
+# layer under test here.
+bus_open_to_all
 say "A caller outside the group may not"
 set +e
 denied=$(texec "$CLIENT" call-s-as-uid 2 "$BUS" /org/finit/manager \

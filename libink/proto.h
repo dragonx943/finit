@@ -12,6 +12,11 @@
 
 #include "link.h"		/* LINK_MSG_* type codes */
 
+/* Fixed portion of the message header: endian, type, flags, version,
+ * body length, serial, and the field-array length -- 16 bytes before
+ * the variable header fields begin. */
+#define LINK_HDR_FIXED_SIZE  16
+
 /* Message flags. */
 #define LINK_FLAG_NO_REPLY_EXPECTED  0x01
 #define LINK_FLAG_NO_AUTO_START      0x02

@@ -44,8 +44,7 @@ Below are a few of the main switches to configure:
 
 * `--enable-static`: Build Finit statically.  The plugins will be
   built-ins (.o files) and all external libraries, except the C library
-  will be linked statically.  Privileged D-Bus methods then accept only
-  `root`, see [Authorization](dbus.md#authorization)
+  will be linked statically.
 
 * `--enable-kernel-cmdline`: Enable Finit pre-4.1 parsing of init args from
   `/proc/cmdline`, this is *not recommended* since Finit may be running as the

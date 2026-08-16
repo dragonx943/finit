@@ -153,10 +153,37 @@ int link_server_accept(link_server_t *srv, link_connection_t **out)
 	conn->auth   = LINK_AUTH_NUL;
 	conn->server = srv;
 
-	if (getsockopt(cfd, SOL_SOCKET, SO_PEERCRED, &cred, &credlen) == 0)
+	if (getsockopt(cfd, SOL_SOCKET, SO_PEERCRED, &cred, &credlen) == 0) {
 		conn->peer_uid = cred.uid;
-	else
+
+		/* Capture the peer's group set from the kernel so the
+		 * authorizer never has to ask NSS (which can block PID 1).
+		 * Primary gid first, then the supplementary groups.
+		 *
+		 * SO_PEERGROUPS is all-or-nothing: too small a buffer gets
+		 * ERANGE and fills nothing, so a peer with more than fits
+		 * is captured as the primary gid alone.  A member of the
+		 * owning group through a supplementary slot beyond the cap
+		 * is then denied -- it fails closed, never open.  Needs
+		 * Linux 4.13; on older kernels the primary gid stands. */
+		conn->peer_groups[0] = cred.gid;
+		conn->peer_ngroups   = 1;
+#ifdef SO_PEERGROUPS
+		{
+			gid_t     sup[LINK_PEER_GROUPS_MAX - 1];
+			socklen_t len = sizeof(sup);
+
+			if (getsockopt(cfd, SOL_SOCKET, SO_PEERGROUPS, sup, &len) == 0) {
+				int n = (int)(len / sizeof(sup[0]));
+
+				for (int i = 0; i < n; i++)
+					conn->peer_groups[conn->peer_ngroups++] = sup[i];
+			}
+		}
+#endif
+	} else {
 		conn->peer_uid = (uid_t)-1;
+	}
 
 	__auth_generate_guid(conn->guid);
 

@@ -18,3 +18,15 @@ fi
 
 say "Wait for $BUS to appear"
 retry "texec test -S $BUS"
+
+# The installed bus stays 0660 (root + the --with-group group), so a
+# caller outside that group is stopped by the socket before any method
+# runs.  A few tests need to reach the per-method authorization behind
+# that gate -- to prove a non-member is refused there too, not only at
+# connect -- so they widen the *test* socket to 0666 first.  Real
+# deployments keep 0660; this only touches the runtime socket in the
+# test namespace.
+bus_open_to_all()
+{
+    texec chmod 0666 "$BUS"
+}

@@ -20,7 +20,7 @@
 
 #include "proto.h"
 
-#define HDR_FIXED_SIZE 16
+#define HDR_FIXED_SIZE LINK_HDR_FIXED_SIZE
 #define MAX_MSG_SIZE   (128 * 1024)	/* sanity limit for PID 1 */
 #define ALIGN_UP(x, n) (((x) + (n) - 1) & ~((size_t)((n) - 1)))
 

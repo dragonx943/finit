@@ -209,22 +209,22 @@ to `--with-group` at build time.  That is the same set the socket mode already
 admits, so the two gates agree instead of the socket letting the group in and
 every method turning it away.
 
-A build configured with `--enable-static` accepts only `root`.  Group
-membership comes from NSS, which the C library loads with `dlopen()`, and a
-build meant to link statically cannot count on that, so the lookup is compiled
-out rather than left to fail open.  The socket mode is unchanged, so the group
-can still connect, it just cannot invoke a privileged method.
-
-On the **local** bus the kernel decides this at `connect()`, supplementary
-groups included, and `SO_PEERCRED` tells Finit exactly who is calling, so
-privilege escalation through the bus is impossible.
+On the **local** bus the kernel settles this at `connect()`: `SO_PEERCRED`
+gives Finit the caller's uid and `SO_PEERGROUPS` its group set, both straight
+from the kernel.  Finit matches the group against `--with-group` itself, so
+the check never touches NSS -- `getpwuid`/`getgrouplist` can block on a slow
+LDAP or SSSD backend, and PID 1 must never block.  Because the group set is
+the caller's real credentials, privilege escalation through the bus is
+impossible.
 
 On the **system** bus one connection carries every caller, so `SO_PEERCRED`
-describes `dbus-daemon` rather than whoever asked.  For a privileged method
-Finit asks the bus driver `GetConnectionUnixUser` about the message sender and
-holds the call until the answer arrives.  Nothing blocks: the reply comes back
-through the same event loop as everything else, and the held call is then
-dispatched or refused on its merits.
+describes `dbus-daemon` rather than whoever asked.  Finit asks the bus driver
+`GetConnectionUnixUser` about the message sender and holds the call until the
+answer arrives -- nothing blocks, the reply comes back through the same event
+loop as everything else.  The broker does not report the caller's groups in
+that reply, so **privileged methods over the system bus are root-only**; group
+membership is honoured on the local bus only.  Lifting that is future work,
+see `libink/README.md`.
 
 Answers are cached per sender.  A bus never reuses a unique name while it
 runs, so an answer holds for as long as that bus does; Finit empties the cache

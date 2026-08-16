@@ -386,18 +386,25 @@ static int do_startstop(int cmd, char *arg)
  * `c` is closed before exit either way.  Use exact-match on the
  * fully-qualified error name; a substring match would misfire on a
  * future name that contained one of these as a prefix. */
-static void map_dbus_err(link_client_t *c, const char *method, const char *ident)
+/* The reply view points into the client's rxbuf, which link_client_close()
+ * frees, so anyone who wants the error name past the close has to copy it
+ * out first.  Both D-Bus error paths in this file do; keep the one copy
+ * here so a third caller cannot reintroduce the use-after-free. */
+static void take_dbus_err(link_client_t *c, char *buf, size_t len)
 {
 	const link_reply_t *r = link_client_reply(c);
+
+	if (r && r->error_name)
+		strlcpy(buf, r->error_name, len);
+	else if (len)
+		buf[0] = '\0';
+}
+
+static void map_dbus_err(link_client_t *c, const char *method, const char *ident)
+{
 	char err[128];
 
-	/* The reply view points into c->rxbuf; copy the error name out
-	 * before link_client_close() frees the client.  Otherwise the
-	 * strcmps below read freed memory. */
-	if (r && r->error_name)
-		strlcpy(err, r->error_name, sizeof(err));
-	else
-		err[0] = '\0';
+	take_dbus_err(c, err, sizeof(err));
 	link_client_close(c);
 
 	if (!strcmp(err, "org.finit.Error.NoSuchService"))
@@ -514,16 +521,16 @@ static int cond_dbus_call(link_client_t **bus, condop_t op,
 		return 1;
 	}
 	if (rc == LINK_CALL_ERROR) {
-		const link_reply_t *r = link_client_reply(*bus);
-		const char *err = (r && r->error_name) ? r->error_name : "";
+		char err[128];
 
+		take_dbus_err(*bus, err, sizeof(err));
 		link_client_close(*bus);
 		*bus = NULL;
 		if (!strcmp(err, "org.freedesktop.DBus.Error.AccessDenied"))
 			ERRX(1, "permission denied: cond %s requires root", method);
 		ERRX(73, "Failed %s condition <%s>: %s",
 		     op == COND_SET ? "asserting" : "deasserting",
-		     arg, *err ? err : "D-Bus error");
+		     arg, err[0] ? err : "D-Bus error");
 	}
 	/* LINK_CALL_FAIL */
 	link_client_close(*bus);

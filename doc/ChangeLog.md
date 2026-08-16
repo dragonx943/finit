@@ -56,8 +56,13 @@ All relevant changes are documented in this file.
       `List`, `Dump` for [user-defined conditions](conditions.md),
       with a `ConditionChanged (ss)` signal.
 
-  Privileged methods reject non-root callers based on the kernel-
-  authenticated peer uid (`SO_PEERCRED`); read-only methods are open.
+  Privileged methods accept root and members of the `--with-group`
+  group; everyone else is refused.  On the local bus the caller's uid
+  and groups come straight from the kernel (`SO_PEERCRED` +
+  `SO_PEERGROUPS`), so the check never blocks PID 1 on an NSS lookup.
+  Over the system bus the uid is resolved from the broker
+  (`GetConnectionUnixUser`) and privileged methods are root-only.
+  Read-only methods are open.
   See [D-Bus Integration](dbus.md) for the full surface, build flag,
   and `dbus-send`/`dbus-monitor` examples.
 

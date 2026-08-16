@@ -57,6 +57,9 @@ texec "$CLIENT" call-void "$BUS" /org/finit/service/keventd \
     || fail "Service1.Restart returned non-zero"
 assert "Per-service Restart ok" 0 -eq 0
 
+# See dbus-manager.sh: widen the test socket so a non-member reaches
+# the method-level authz behind the 0660 gate.
+bus_open_to_all
 say "Service1.Restart from non-root is rejected with AccessDenied"
 set +e
 texec "$CLIENT" call-void-as-uid 1 "$BUS" /org/finit/service/keventd \

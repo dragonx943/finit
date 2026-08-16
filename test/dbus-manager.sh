@@ -39,6 +39,10 @@ case "$(cat /tmp/dbus-stop.out)" in
     *) fail "Unexpected error reply: $(cat /tmp/dbus-stop.out)" ;;
 esac
 
+# Non-root callers here are outside the --with-group group; widen the
+# test socket so they reach the per-method authz rather than being
+# stopped at connect by the 0660 mode.
+bus_open_to_all
 say "Manager1.Restart from non-root is rejected with AccessDenied"
 set +e
 texec "$CLIENT" call-s-as-uid 1 "$BUS" /org/finit/manager \

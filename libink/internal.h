@@ -28,6 +28,12 @@ typedef enum {
 #define LINK_MATCH_RULE_MAX    256	/* per-peer match rule cap */
 #define LINK_MATCH_PEER_CAP    16	/* max active match rules per peer */
 #define LINK_PENDING_CAP        4	/* outbound calls awaiting a reply */
+/* Primary gid plus supplementary groups captured from SO_PEERGROUPS at
+ * accept, so the authorizer can answer group membership without an NSS
+ * lookup in PID 1.  A peer in more groups than this keeps only its
+ * primary gid (see link_server_accept), which fails closed.  32 covers
+ * a normal login; a directory environment can exceed it. */
+#define LINK_PEER_GROUPS_MAX   32
 /* Staging for an outgoing method call.  Generous on purpose: headers
  * for the calls libink makes run to ~150 B, and both the synchronous
  * and the connection-side path build into these, so one answer rather
@@ -142,6 +148,8 @@ struct link_match {
 struct link_connection {
 	int                 fd;
 	uid_t               peer_uid;
+	gid_t               peer_groups[LINK_PEER_GROUPS_MAX];
+	int                 peer_ngroups;	/* 0 until captured at accept */
 
 	char                guid[33];
 	char                unique_name[LINK_UNIQUE_NAME_LEN]; /* ":1.N" */

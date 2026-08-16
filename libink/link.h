@@ -135,10 +135,15 @@ typedef int (*link_uid_resolver_t)(link_connection_t *conn, const char *sender,
 void link_server_set_uid_resolver(link_server_t *server, link_uid_resolver_t cb,
 				  void *userdata);
 
-/* May `uid` invoke a LINK_METHOD_PRIVILEGED method?  Return non-zero
- * to allow.  Who counts as privileged is the embedder's policy, not
- * the library's; with no authorizer installed only uid 0 may. */
-typedef int (*link_authorizer_t)(uid_t uid, void *userdata);
+/* May this caller invoke a LINK_METHOD_PRIVILEGED method?  Return
+ * non-zero to allow.  `groups` is the caller's group set (primary gid
+ * first), captured from the kernel with SO_PEERGROUPS so the embedder
+ * can decide membership without an NSS lookup that would block PID 1;
+ * `ngroups` is 0 when the set is unknown, e.g. a call arriving over a
+ * broker, where only `uid` is available.  Who counts as privileged is
+ * the embedder's policy; with no authorizer installed only uid 0 may. */
+typedef int (*link_authorizer_t)(uid_t uid, const gid_t *groups, int ngroups,
+				 void *userdata);
 
 void link_server_set_authorizer(link_server_t *server, link_authorizer_t cb,
 				void *userdata);

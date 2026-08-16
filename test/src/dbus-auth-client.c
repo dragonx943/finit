@@ -42,6 +42,8 @@
  */
 
 #include <errno.h>
+#include <grp.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +53,17 @@
 #include <unistd.h>
 
 #include "link.h"
+
+/* The -as-uid modes drop all privileges before exiting, and LeakSanitizer
+ * cannot run under that (it needs ptrace on itself).  Turn leak detection
+ * off for this test client via ASan's startup hook; it is a short-lived
+ * tool, and finit -- the process whose leaks actually matter -- is checked
+ * on its own.  Harmless when the build has no sanitizer. */
+const char *__asan_default_options(void);
+const char *__asan_default_options(void)
+{
+	return "detect_leaks=0";
+}
 
 /* ---------- manual SASL: only mode_auth uses this ---------- */
 
@@ -153,9 +166,15 @@ static int report_rc(link_client_t *c, int rc)
 	return 2;
 }
 
-/* Drop effective uid to argv-supplied value (decimal). */
+/* Become the argv-supplied uid (decimal), the way a login does: reset
+ * the group set from the target user's /etc/group entry before setuid,
+ * so the connection carries that user's real credentials.  A bare
+ * setuid() would keep root's groups, and SO_PEERGROUPS would then hand
+ * the server a caller who still holds root's privileges -- masking the
+ * very authorization the -as-uid tests check. */
 static int drop_uid(const char *uid_arg, const char *progname)
 {
+	struct passwd *pw;
 	char *ep = NULL;
 	long  v;
 
@@ -165,6 +184,22 @@ static int drop_uid(const char *uid_arg, const char *progname)
 		fprintf(stderr, "%s: bad uid: %s\n", progname, uid_arg);
 		return 2;
 	}
+
+	pw = getpwuid((uid_t)v);
+	if (pw) {
+		if (initgroups(pw->pw_name, pw->pw_gid) < 0) {
+			perror("initgroups");
+			return 2;
+		}
+		if (setgid(pw->pw_gid) < 0) {
+			perror("setgid");
+			return 2;
+		}
+	} else if (setgroups(0, NULL) < 0) {	/* no entry: drop all groups */
+		perror("setgroups");
+		return 2;
+	}
+
 	if (setuid((uid_t)v) < 0) {
 		perror("setuid");
 		return 2;

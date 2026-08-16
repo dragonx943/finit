@@ -457,6 +457,12 @@ static int handle_remove_match(link_connection_t *conn, const struct link_msg *m
 
 /* ---------- entry point ---------- */
 
+/* Returns 0 when a built-in handled the call and its reply went out,
+ * -1 when a built-in handled it but the send failed (the caller must
+ * drop the connection, its stream is now half-written), and 1 when
+ * the member is not a built-in and the caller should try the object
+ * tree.  The three are distinct so a failed send is never mistaken
+ * for "not mine". */
 int __handle_builtin(link_connection_t *conn, const struct link_msg *m)
 {
 	/* Hello and AddMatch/RemoveMatch are per-connection state, and on
@@ -501,5 +507,5 @@ int __handle_builtin(link_connection_t *conn, const struct link_msg *m)
 	if (member_is(m, "org.freedesktop.DBus.Properties", "GetAll"))
 		return handle_properties_get_all(conn, m);
 
-	return -1;	/* not a built-in */
+	return 1;	/* not a built-in, let the caller try the object tree */
 }

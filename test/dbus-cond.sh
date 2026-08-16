@@ -56,6 +56,9 @@ case "$(cat /tmp/dbus-condrej.out)" in
     *) fail "Unexpected reply: $(cat /tmp/dbus-condrej.out)" ;;
 esac
 
+# See dbus-manager.sh: widen the test socket so a non-member reaches
+# the method-level authz behind the 0660 gate.
+bus_open_to_all
 say "Cond1.Set from non-root is rejected with AccessDenied"
 set +e
 texec "$CLIENT" call-s-as-uid 1 "$BUS" /org/finit/cond \
@@ -66,4 +69,19 @@ assert "Non-root Cond1.Set rejected (rc=$ca_rc)" "$ca_rc" -eq 1
 case "$(cat /tmp/dbus-condauthz.out)" in
     *AccessDenied*) assert "Cond1 authz fires" 0 -eq 0 ;;
     *) fail "Unexpected reply: $(cat /tmp/dbus-condauthz.out)" ;;
+esac
+
+# initctl's own error path: a non-usr name comes back InvalidArgs from
+# the server, which drove cond_dbus_call to read the error reply after
+# freeing the client (a use-after-free ASan catches on this build).
+# Exercise it here so the fix stays fixed.
+say "initctl cond set of a rejected name reports cleanly, no use-after-free"
+set +e
+out=$(texec sh -c 'initctl cond set aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 2>&1)
+ic_rc=$?
+set -e
+assert "initctl reported the rejection (rc=$ic_rc)" "$ic_rc" -ne 0
+case "$out" in
+    *[Ff]ailed*|*InvalidArgs*|*restricted*) assert "error surfaced, not a crash" 0 -eq 0 ;;
+    *) fail "Unexpected initctl output: $out" ;;
 esac
