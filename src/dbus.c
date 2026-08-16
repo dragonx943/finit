@@ -665,7 +665,11 @@ static int service_action_method(link_call_t *call, void *userdata,
 			"org.finit.Error.NoSuchService",
 			"Service object no longer valid");
 
-	action(svc, NULL);
+	if (action(svc, NULL))
+		return link_call_reply_error(call,
+			"org.finit.Error.Failed",
+			"failed on service");
+
 	(void)link_call_reply(call);
 	return 0;
 }
@@ -1148,7 +1152,7 @@ static int cond1_set_or_clear(link_call_t *call, int do_set)
 			"org.freedesktop.DBus.Error.InvalidArgs",
 			"Set/Clear is restricted to usr/* conditions");
 
-	if (do_set)
+	if (do_set) {
 		/* cond_set_oneshot, not cond_set: a user-asserted condition
 		 * is a symlink to _PATH_RECONF, so it tracks the reconf
 		 * generation automatically and stays "on" across reloads
@@ -1157,8 +1161,17 @@ static int cond1_set_or_clear(link_call_t *call, int do_set)
 		 * semantics for user conditions, and what initctl cond set
 		 * has done forever via the filesystem path. */
 		cond_set_oneshot(full);
-	else
+		if (cond_get(full) != COND_ON)
+			return link_call_reply_error(call,
+				"org.finit.Error.Failed",
+				"failed asserting condition");
+	} else {
 		cond_clear(full);
+		if (cond_get(full) != COND_OFF)
+			return link_call_reply_error(call,
+				"org.finit.Error.Failed",
+				"failed clearing condition");
+	}
 
 	(void)link_call_reply(call);
 	return 0;
