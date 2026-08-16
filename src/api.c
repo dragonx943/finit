@@ -236,14 +236,16 @@ static void bypass_shutdown(void *unused)
 /*
  * Handle switch_root API command.
  * Parses data: "newroot\0newinit\0"
- * Sends ACK before attempting switch_root since it doesn't return on success.
- * Returns: result from switch_root() on failure, doesn't return on success.
+ *
+ * On precheck failure, returns 1 with a message in rq->data for
+ * api_cb() to NACK.  Does not return on success, and a post-ACK
+ * failure has nobody left to reply to, so returns 0 either way.
  */
 static int do_switch_root_api(int sd, struct init_request *rq)
 {
+	char errbuf[128];
 	char *newroot, *newinit = NULL;
 	char *ptr;
-	int result;
 
 	dbg("switch-root %s", rq->data);
 	strterm(rq->data, sizeof(rq->data));
@@ -256,8 +258,13 @@ static int do_switch_root_api(int sd, struct init_request *rq)
 			newinit = ptr;
 	}
 
+	if (switch_root_precheck(newroot, newinit, errbuf, sizeof(errbuf))) {
+		snprintf(rq->data, sizeof(rq->data), "switch-root: %s", errbuf);
+		return 1;
+	}
+
 	/*
-	 * Send ACK first, since we won't return from
+	 * Send ACK now, since we won't return from
 	 * switch_root() on success.
 	 */
 	rq->cmd = INIT_CMD_ACK;
@@ -265,12 +272,10 @@ static int do_switch_root_api(int sd, struct init_request *rq)
 		dbg("Failed sending ACK to client");
 	close(sd);
 
-	/* This does not return on success */
-	result = switch_root(newroot, newinit);
-	if (result)
-		logit(LOG_ERR, "switch_root failed: %s", strerror(errno));
+	/* Does not return on success, logs its own failures */
+	switch_root(newroot, newinit);
 
-	return result;
+	return 0;
 }
 
 static int do_reboot(int cmd, int timeout, char *buf, size_t len)
@@ -435,7 +440,10 @@ static void api_cb(uev_t *w, void *arg, int events)
 
 		case INIT_CMD_SWITCH_ROOT:
 			if (runlevel != INIT_LEVEL && runlevel != 1) {
-				warnx("switch-root only allowed in runlevel S or 1");
+				strlcpy(rq.data, "switch-root: only allowed in runlevel S or 1",
+					sizeof(rq.data));
+				warnx("%s", rq.data);
+				result = 1;
 				goto done;
 			}
 			break;
@@ -541,8 +549,10 @@ static void api_cb(uev_t *w, void *arg, int events)
 			break;
 
 		case INIT_CMD_SWITCH_ROOT:
-			do_switch_root_api(sd, &rq);
-			goto leave;
+			result = do_switch_root_api(sd, &rq);
+			if (result)
+				break;	/* precheck failed before ACK, done: sends the NACK */
+			goto leave;	/* ACK sent and sd closed by do_switch_root_api() */
 
 		case INIT_CMD_ACK:
 			dbg("Client failed reading ACK");

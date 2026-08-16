@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -137,6 +138,96 @@ static int kill_cb(int pid, void *data)
 }
 
 /*
+ * Log a precheck failure, optionally handing the message back to the
+ * caller in errbuf for relaying to the client.
+ */
+static int __attribute__ ((format (printf, 4, 5)))
+switch_root_fail(char *errbuf, size_t errbuflen, int err, const char *fmt, ...)
+{
+	char msg[128];
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, ap);
+	va_end(ap);
+
+	logit(LOG_ERR, "switch_root: %s", msg);
+	if (errbuf)
+		strlcpy(errbuf, msg, errbuflen);
+
+	errno = err;
+	return -1;
+}
+
+/*
+ * Validate a switch_root request without side effects, so the caller
+ * can reject a bad request before committing to teardown.
+ *
+ * On failure, returns -1 with errno set.  If errbuf is non-NULL it
+ * also gets a text reason, better suited for a client reply than
+ * strerror(errno).
+ */
+int switch_root_precheck(const char *newroot, const char *newinit,
+			 char *errbuf, size_t errbuflen)
+{
+	struct stat newroot_st, oldroot_st;
+	char init_path[PATH_MAX];
+	int fd;
+
+	if (!newroot || !newroot[0])
+		return switch_root_fail(errbuf, errbuflen, EINVAL, "no new root given");
+
+	/* Default to /sbin/init if not specified */
+	if (!newinit || !newinit[0])
+		newinit = "/sbin/init";
+
+	/* Verify we're PID 1 */
+	if (getpid() != 1)
+		return switch_root_fail(errbuf, errbuflen, EPERM, "must be run as PID 1");
+
+	/* Verify newroot exists and is a directory */
+	fd = open(newroot, O_RDONLY | O_DIRECTORY);
+	if (fd < 0)
+		return switch_root_fail(errbuf, errbuflen, ENOTDIR,
+					 "%s is not a directory", newroot);
+
+	if (fstat(fd, &newroot_st)) {
+		int saved_errno = errno;
+
+		close(fd);
+		return switch_root_fail(errbuf, errbuflen, saved_errno,
+					 "cannot stat %s: %s", newroot, strerror(saved_errno));
+	}
+	close(fd);
+
+	/* Verify newroot is a mount point (different device than parent) */
+	fd = open("/", O_RDONLY | O_DIRECTORY);
+	if (fd < 0)
+		return switch_root_fail(errbuf, errbuflen, errno,
+					"cannot open /: %s", strerror(errno));
+	if (fstat(fd, &oldroot_st)) {
+		int saved_errno = errno;
+
+		close(fd);
+		return switch_root_fail(errbuf, errbuflen, saved_errno,
+					 "cannot stat /: %s", strerror(saved_errno));
+	}
+	close(fd);
+
+	if (newroot_st.st_dev == oldroot_st.st_dev)
+		return switch_root_fail(errbuf, errbuflen, EINVAL,
+					 "%s is not a mount point", newroot);
+
+	/* Verify init exists in new root */
+	snprintf(init_path, sizeof(init_path), "%s%s", newroot, newinit);
+	if (access(init_path, X_OK))
+		return switch_root_fail(errbuf, errbuflen, ENOENT,
+					 "%s not found or not executable", init_path);
+
+	return 0;
+}
+
+/*
  * Perform switch_root to a new root filesystem
  *
  * This function does not return on success - it exec's the new init.
@@ -144,69 +235,23 @@ static int kill_cb(int pid, void *data)
  */
 int switch_root(const char *newroot, const char *newinit)
 {
-	struct stat newroot_st, oldroot_st;
-	char init_path[PATH_MAX];
+	struct stat oldroot_st;
 	int console_fd;
-	int fd;
 	dev_t rootdev;
 	int signo;
 
-	if (!newroot || !newroot[0]) {
-		errno = EINVAL;
+	/* No client left to relay a message to */
+	if (switch_root_precheck(newroot, newinit, NULL, 0))
 		return -1;
-	}
 
-	/* Default to /sbin/init if not specified */
+	/* Default to /sbin/init, as in switch_root_precheck() */
 	if (!newinit || !newinit[0])
 		newinit = "/sbin/init";
 
-	/* Verify we're PID 1 */
-	if (getpid() != 1) {
-		logit(LOG_ERR, "switch_root must be run as PID 1");
-		errno = EPERM;
-		return -1;
-	}
-
-	/* Verify newroot exists and is a directory */
-	fd = open(newroot, O_RDONLY | O_DIRECTORY);
-	if (fd < 0) {
-		logit(LOG_ERR, "switch_root: %s is not a directory", newroot);
-		errno = ENOTDIR;
-		return -1;
-	}
-	if (fstat(fd, &newroot_st)) {
-		close(fd);
-		logit(LOG_ERR, "switch_root: cannot stat %s", newroot);
-		return -1;
-	}
-	close(fd);
-
-	/* Verify newroot is a mount point (different device than parent) */
-	fd = open("/", O_RDONLY | O_DIRECTORY);
-	if (fd < 0) {
-		logit(LOG_ERR, "switch_root: cannot open /");
-		return -1;
-	}
-	if (fstat(fd, &oldroot_st)) {
-		close(fd);
-		logit(LOG_ERR, "switch_root: cannot stat /");
-		return -1;
-	}
-	close(fd);
-
-	if (newroot_st.st_dev == oldroot_st.st_dev) {
-		logit(LOG_ERR, "switch_root: %s is not a mount point", newroot);
-		errno = EINVAL;
-		return -1;
-	}
-
-	/* Verify init exists in new root */
-	snprintf(init_path, sizeof(init_path), "%s%s", newroot, newinit);
-	if (access(init_path, X_OK)) {
-		logit(LOG_ERR, "switch_root: %s not found or not executable", init_path);
-		errno = ENOENT;
-		return -1;
-	}
+	/* Needed below for the initramfs cleanup */
+	if (stat("/", &oldroot_st))
+		return switch_root_fail(NULL, 0, errno,
+					"cannot stat /: %s", strerror(errno));
 
 	logit(LOG_NOTICE, "Performing switch_root to %s, init %s", newroot, newinit);
 
