@@ -97,11 +97,12 @@ endif
 initctl_SOURCES    = initctl.c initctl.h cgutil.c cgutil.h		\
 		     client.c client.h cond.c cond.h reboot.c		\
 		     serv.c serv.h svc.h util.c util.h log.h
+initctl_CPPFLAGS   = $(AM_CPPFLAGS)
 initctl_CFLAGS     = -W -Wall -Wextra -Wno-unused-parameter -std=gnu99
 initctl_CFLAGS    += $(lite_CFLAGS) $(uev_CFLAGS)
 initctl_LDADD      = $(lite_LIBS) $(uev_LIBS)
 if DBUS
-initctl_CPPFLAGS   = $(AM_CPPFLAGS) -I$(top_srcdir)/libink
+initctl_CPPFLAGS  += -I$(top_srcdir)/libink
 initctl_LDADD     += $(top_builddir)/libink/libink.la
 endif
 
