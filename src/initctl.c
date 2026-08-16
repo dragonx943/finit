@@ -1161,10 +1161,14 @@ int do_switch_root(int argc, char *argv[])
 	printf(" ...\n");
 
 	/*
-	 * On success, finit exec's new init and we lose connection.
-	 * A "failure" to read reply is actually expected on success.
+	 * Unlike do_cmd(), a failing client_send() is expected here: on
+	 * success Finit execs the new init and the connection dies with
+	 * no reply.  Only an explicit NACK means the request was denied.
 	 */
-	client_send(&rq, sizeof(rq));
+	if (client_send(&rq, sizeof(rq)) && rq.cmd == INIT_CMD_NACK) {
+		puts(rq.data);
+		return 1;
+	}
 
 	return 0;
 }
