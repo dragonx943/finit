@@ -21,8 +21,8 @@ ssize_t __w_finish(struct link_writer *w);
 
 void __w_byte    (struct link_writer *w, uint8_t v);
 void __w_bool    (struct link_writer *w, int v);
-void __w_u64   (struct link_writer *w, uint64_t v);
 void __w_u32     (struct link_writer *w, uint32_t v);
+void __w_u64     (struct link_writer *w, uint64_t v);
 void __w_string  (struct link_writer *w, const char *s);  /* "s" */
 void __w_path    (struct link_writer *w, const char *s);  /* "o" */
 void __w_sig     (struct link_writer *w, const char *s);  /* "g" */

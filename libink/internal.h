@@ -40,7 +40,7 @@ typedef enum {
  * than a number per call site. */
 #define LINK_CALL_HDR_MAX    1024
 #define LINK_CALL_BODY_MAX   1024
-#define LINK_PARKED_CAP         4	/* inbound calls awaiting a uid */
+#define LINK_PARKED_CAP         4	/* inbound calls held for later */
 /* A call parked for authorization is a privileged one: an object path
  * and at most a service name.  Finit's per-service paths alone run to
  * 512 bytes, so leave room for the header around one.  Anything that
@@ -74,6 +74,7 @@ struct link_parked {
 	link_authz_t        tok;
 	link_connection_t  *conn;
 	uint64_t            stamp;
+	uid_t               uid;	/* caller, for handler-parked calls */
 	size_t              len;
 	uint8_t             buf[LINK_PARKED_MSG_MAX];
 };
@@ -133,6 +134,10 @@ struct link_call {
 	int               reply_consumed;
 	int               error_sent;
 	uid_t             uid;		/* caller, resolved for a broker peer */
+	const uint8_t     *frame;	/* raw frame, for link_call_park() */
+	size_t            framelen;
+	int               parked;	/* handler deferred its reply */
+	int               resumed;	/* re-run via link_call_resume() */
 };
 
 /* A parsed AddMatch rule.  Fields are NULL when the rule omits the

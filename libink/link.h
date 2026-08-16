@@ -155,6 +155,19 @@ void link_server_set_authorizer(link_server_t *server, link_authorizer_t cb,
  * asked about; a reply callback is handed it as its first argument. */
 void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid);
 
+/* ----------  handler-deferred replies  ---------- */
+
+/* A handler that cannot answer yet parks the call and returns 0
+ * without replying; the framework sends nothing.  Resume re-runs the
+ * handler with link_call_resumed() reading true, and this time it
+ * must reply -- a resumed call cannot park again.  Parked calls that
+ * are never resumed are expired by link_connection_expire() with a
+ * TimedOut error.  Room is limited (four per connection); a failed
+ * park means answer now. */
+int  link_call_park   (link_call_t *call, link_authz_t *tok);
+void link_call_resume (link_connection_t *conn, link_authz_t tok);
+int  link_call_resumed(const link_call_t *call);
+
 /* Called with the reply to an outbound link_connection_call().  `reply`
  * is NULL if the connection dropped before one arrived. */
 typedef void (*link_reply_cb_t)(link_connection_t *conn, const link_reply_t *reply,
