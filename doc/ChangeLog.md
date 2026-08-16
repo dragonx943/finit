@@ -33,38 +33,31 @@ All relevant changes are documented in this file.
   private bus at `/run/finit/bus`, and -- opportunistically --
   registering `org.finit` on the standard system bus when a
   `dbus-daemon` is reachable.  No external `libdbus`/`sd-bus`/`GIO`
-  dependency.
-
-  The bus implements the stock `org.freedesktop.DBus`,
-  `org.freedesktop.DBus.Peer`, `org.freedesktop.DBus.Introspectable`,
-  and `org.freedesktop.DBus.Properties` interfaces, plus three
-  Finit-specific ones:
-
-    * `org.finit.Manager1` at `/org/finit/manager` --
-      `ListServices`, `GetService`, `Start`/`Stop`/`Restart`/`Reload`,
-      `SetRunlevel`, `SetDebug`, `Signal`, `Suspend`, and the
-      `Reboot`/`Halt`/`Poweroff` triplet.  Read-only properties
-      `Runlevel`, `PrevRunlevel`, `Version`.  Signals
-      `ServiceStateChanged (sss)` and `RunlevelChanged (ss)`.
-
-    * `org.finit.Service1` at `/org/finit/service/<encoded>` -- one
-      object per loaded service, with `Start`/`Stop`/`Restart`/`Reload`
-      for working off an object handle rather than passing the
-      identity string around.
-
-    * `org.finit.Cond1` at `/org/finit/cond` -- `Get`, `Set`, `Clear`,
-      `List`, `Dump` for [user-defined conditions](conditions.md),
-      with a `ConditionChanged (ss)` signal.
-
-  Privileged methods accept root and members of the `--with-group`
-  group; everyone else is refused.  On the local bus the caller's uid
-  and groups come straight from the kernel (`SO_PEERCRED` +
-  `SO_PEERGROUPS`), so the check never blocks PID 1 on an NSS lookup.
-  Over the system bus the uid is resolved from the broker
-  (`GetConnectionUnixUser`) and privileged methods are root-only.
-  Read-only methods are open.
+  dependency.  The bus implements the stock `org.freedesktop.DBus`,
+  `Peer`, `Introspectable`, and `Properties` interfaces.
   See [D-Bus Integration](dbus.md) for the full surface, build flag,
-  and `dbus-send`/`dbus-monitor` examples.
+  and `dbus-send`/`dbus-monitor` examples
+- New `org.finit.Manager1` interface at `/org/finit/manager`:
+  `ListServices`, `GetService`, `Start`/`Stop`/`Restart`/`Reload`,
+  `SetRunlevel`, `SetDebug`, `Signal`, `Suspend`, and the
+  `Reboot`/`Halt`/`Poweroff` triplet, which take a timeout argument
+  arming the emergency shutdown bypass like `initctl -t`.  Read-only
+  properties `Runlevel`, `PrevRunlevel`, `Version`; signals
+  `ServiceStateChanged (sss)` and `RunlevelChanged (ss)`
+- New `org.finit.Service1` interface at `/org/finit/service/<encoded>`,
+  one object per loaded service, with `Start`/`Stop`/`Restart`/`Reload`
+  for working off an object handle rather than passing the identity
+  string around
+- New `org.finit.Cond1` interface at `/org/finit/cond`: `Get`, `Set`,
+  `Clear`, `List`, `Dump` for [user-defined conditions](conditions.md),
+  with a `ConditionChanged (ss)` signal
+- Privileged D-Bus methods accept root and members of the
+  `--with-group` group; everyone else is refused.  On the local bus
+  the caller's uid and groups come straight from the kernel
+  (`SO_PEERCRED` + `SO_PEERGROUPS`), so the check never blocks PID 1
+  on an NSS lookup.  Over the system bus the uid is resolved from the
+  broker (`GetConnectionUnixUser`) and privileged methods are
+  root-only.  Read-only methods are open
 
 - `initctl` now transparently routes through D-Bus when the bus is
   reachable, with the legacy `INIT_SOCKET` transport as a fallback:

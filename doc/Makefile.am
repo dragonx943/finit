@@ -3,6 +3,7 @@ EXTRA_DIST      = AUTHORS ChangeLog.md
 
 docsdir        := @docdir@/doc
 dist_docs_DATA  = build.md cmdline.md commands.md conditions.md 	\
+		  dbus.md						\
 		  distro.md example.md features.md index.md initctl.md	\
 		  keventd.md plugins.md requirements.md runlevels.md	\
 		  runparts.md service.md signals.md state-machine.md	\

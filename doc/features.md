@@ -275,6 +275,10 @@ initctl top                       # Interactive resource monitor
 initctl cond set usr/custom       # Set custom condition
 ```
 
+`initctl` rides Finit's built-in [D-Bus API](dbus.md) when available,
+which is also open to any other bus client, including `dbus-send` and
+language bindings.
+
 See the [Commands & Status](initctl.md) section for complete documentation.
 
 

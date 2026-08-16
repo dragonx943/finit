@@ -19,6 +19,10 @@ is the official tool for interacting with
 .Xr finit 8 .
 It comes with functions for showing status, querying health of services,
 as well as editing, enabling and disabling services.
+Commands are sent over the Finit D-Bus API when available, with the
+legacy
+.Pa INIT_SOCKET
+protocol as fallback.
 .Sh OPTIONS
 This program follows the usual UNIX command line syntax, with long
 options starting with two dashes (`-').  The options are as follows:
@@ -205,6 +209,10 @@ restricted
 Send signal S to service, by name.
 .Cm S
 may be a complete signal name such as SIGHUP, or short name such as HUP, or the signal number such as 1 (SIGHUP)
+.It Nm Ar monitor
+Stream service state, runlevel, and condition change signals from the
+Finit D-Bus API until interrupted.  Only available when Finit is built
+with D-Bus support
 .It Nm Ar restart Cm NAME[:ID]
 Restart (stop/start) service by name
 .It Nm Ar status Cm NAME[:ID]

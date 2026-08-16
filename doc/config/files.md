@@ -24,6 +24,7 @@ the following layout is recommended:
     |           `- ...
     `- run/
         `- finit/
+            |- bus         # Finit's own D-Bus socket, see doc/dbus.md
             `- system/
                 |- dbus.conf
                 |- keventd.conf
