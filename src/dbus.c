@@ -462,11 +462,18 @@ static int manager_set_runlevel(link_call_t *call, void *userdata)
 
 static int dbus_shutdown(link_call_t *call, shutop_t target, int level)
 {
+	uint32_t timeout;
+
+	if (link_call_read_u32(call, &timeout) < 0)
+		return link_call_reply_error(call,
+			"org.freedesktop.DBus.Error.InvalidArgs",
+			"expected (u)");
 	if (IS_RESERVED_RUNLEVEL(runlevel))
 		return link_call_reply_error(call,
 			"org.finit.Error.WrongRunlevel",
 			"Already in shutdown");
 	halt = target;
+	shutdown_bypass((int)timeout);
 	sm_runlevel(level);
 	(void)link_call_reply(call);
 	return 0;
@@ -623,11 +630,11 @@ static const link_method_t manager_methods[] = {
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_reload },
 	{ .name = "SetRunlevel",  .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_set_runlevel },
-	{ .name = "Reboot",       .in_sig = "",  .out_sig = "",
+	{ .name = "Reboot",       .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_reboot },
-	{ .name = "Poweroff",     .in_sig = "",  .out_sig = "",
+	{ .name = "Poweroff",     .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_poweroff },
-	{ .name = "Halt",         .in_sig = "",  .out_sig = "",
+	{ .name = "Halt",         .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_halt },
 	{ .name = "Suspend",      .in_sig = "",  .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_suspend },

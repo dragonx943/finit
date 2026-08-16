@@ -222,16 +222,6 @@ static svc_t *do_find_byc(char *buf, size_t len)
 	return svc_find_by_cond(input);
 }
 
-static void bypass_shutdown(void *);
-struct wq emergency = { .cb = bypass_shutdown };
-
-static void bypass_shutdown(void *unused)
-{
-	(void)unused;
-
-	cprintf("TIMEOUT TIMEOUT SHUTTING DOWN NOW!!\n");
-	do_shutdown(halt);
-}
 
 
 /*
@@ -298,10 +288,7 @@ static int do_reboot(int cmd, int timeout, char *buf, size_t len)
 		return 255;
 	}
 
-	if (timeout > 0) {
-		emergency.delay = timeout * 1000;
-		schedule_work(&emergency);
-	}
+	shutdown_bypass(timeout);
 
 	switch (cmd) {
 	case INIT_CMD_REBOOT:

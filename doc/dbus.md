@@ -95,7 +95,7 @@ and the service registry.
 | `SetDebug`                   | —      | —       | yes   | Toggle Finit's runtime debug flag                         |
 | `Signal`                     | `su`   | —       | yes   | Send signal `u` (1–31) to services matching identity `s`  |
 | `Suspend`                    | —      | —       | yes   | `sync()` + suspend-to-RAM                                 |
-| `Reboot`, `Halt`, `Poweroff` | —      | —       | yes   | Trigger the corresponding shutdown sequence               |
+| `Reboot`, `Halt`, `Poweroff` | `u`    | —       | yes   | Trigger the corresponding shutdown sequence; the argument arms the emergency fallback timer (seconds, 0 = none) |
 
 ### Properties
 
@@ -250,9 +250,9 @@ the following subcommands use the bus first:
 | `initctl restart`          | `Manager1.Restart(svc)`                          |
 | `initctl reload`           | `Manager1.Reload()`                              |
 | `initctl reload S`         | `Service1.Reload()` (per-svc)                    |
-| `initctl reboot`           | `Manager1.Reboot()`                              |
-| `initctl halt`             | `Manager1.Halt()`                                |
-| `initctl poweroff`         | `Manager1.Poweroff()`                            |
+| `initctl reboot`           | `Manager1.Reboot(timeout)`                       |
+| `initctl halt`             | `Manager1.Halt(timeout)`                         |
+| `initctl poweroff`         | `Manager1.Poweroff(timeout)`                     |
 | `initctl suspend`          | `Manager1.Suspend()`                             |
 | `initctl debug`            | `Manager1.SetDebug()`                            |
 | `initctl signal`           | `Manager1.Signal(svc, signo)`                    |

@@ -95,6 +95,29 @@ static void shutdown_wdt_cb(uev_t *w, void *arg, int events)
 }
 
 /*
+ * Emergency shutdown bypass, same job as the shutdown watchdog above
+ * but armed by the user: `initctl -t SEC reboot`, on either transport.
+ */
+static void bypass_shutdown(void *unused)
+{
+	(void)unused;
+
+	cprintf("TIMEOUT TIMEOUT SHUTTING DOWN NOW!!\n");
+	do_shutdown(halt);
+}
+
+static struct wq emergency = { .cb = bypass_shutdown };
+
+void shutdown_bypass(int timeout)
+{
+	if (timeout <= 0)
+		return;
+
+	emergency.delay = timeout * 1000;
+	schedule_work(&emergency);
+}
+
+/*
  * User-requested runlevel change, shared by the legacy API and the
  * D-Bus SetRunlevel method.  Refused in runlevel 0/6, deferred via
  * cfglevel during bootstrap.
