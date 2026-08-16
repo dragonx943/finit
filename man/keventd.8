@@ -215,6 +215,38 @@ service cron {
     command     = "cron -f"
 }
 .Ed
+.Sh D-BUS INTERFACE
+With D-Bus support,
+.Nm
+serves
+.Cm org.finit.Device1
+at
+.Pa /org/finit/device
+on its own brokerless bus,
+.Pa unix:path=/run/keventd/bus ,
+the same way
+.Xr finit 8
+serves
+.Cm org.finit .
+Methods:
+.Bl -tag -width RulesReload -offset indent -compact
+.It Cm Settle (u) -> b
+Wait until the device event queue drains, timeout in seconds
+.It Cm Trigger (ss)
+Replay events: action and subsystem glob, empty glob matches all
+.It Cm Info (s) -> a{ss}
+Device properties for a devpath, from /run/udev/data
+.It Cm RulesReload () -> u
+Re-read the udev rules directories, returns the rule count
+.El
+.Pp
+Properties
+.Cm QueueEmpty (b)
+and
+.Cm SeqnumProcessed (t)
+expose the queue state; the
+.Cm DeviceProcessed (ss)
+signal fires after each fully handled event.
 .Sh NETLINK REBROADCAST
 The Linux kernel sends uevents to netlink multicast group 1 (bit 0) of
 .Dv NETLINK_KOBJECT_UEVENT .

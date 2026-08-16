@@ -40,6 +40,8 @@ kernel events and handles:
   system when device nodes appear or disappear
 - **Netlink rebroadcast**: rebroadcasts processed uevents to netlink
   group 0x4 for [libudev-zero][] consumers (enabled by default)
+- **D-Bus interface**: `org.finit.Device1` -- settle, trigger, device
+  info, rules reload, and queue state over its own bus socket
 
 
 Device Nodes
@@ -331,12 +333,15 @@ It is the `udevadm settle` equivalent for migration scenarios:
 
     keventd -S -t 10 && start-graphical-session
 
-It does not talk to the running keventd (or any device manager) -- it
-simply opens `/sys/kernel/uevent_seqnum` and polls until the kernel's
-sequence counter has been stable for 200ms, then exits zero.  After
-the `-t SECONDS` timeout (default 30) it exits non-zero instead.
-Because `uevent_seqnum` is maintained by the kernel itself, `-S` works
-regardless of which device manager is active, or even if none is.
+With D-Bus support it asks the running keventd over
+[`Device1.Settle`](#d-bus-interface-orgfinitdevice1), which tracks the
+event queue where the events actually flow.  When no bus answers --
+another device manager, or a build without D-Bus -- it falls back to
+polling `/sys/kernel/uevent_seqnum` until the kernel's sequence
+counter has been stable for 200ms, then exits zero.  After the
+`-t SECONDS` timeout (default 30) it exits non-zero instead.  The
+fallback works regardless of which device manager is active, or even
+if none is.
 
 Prefer the condition-based model (`<dev/X>`, `<class/...>`,
 `<driver/...>`) over settle when you control the service definition --
@@ -347,6 +352,50 @@ where condition wiring isn't feasible.
 Debug logging can also be toggled at runtime by sending `SIGUSR1`:
 
     kill -USR1 $(pidof keventd)
+
+
+D-Bus Interface (`org.finit.Device1`)
+-------------------------------------
+
+With D-Bus support (default, `--disable-dbus` opts out) keventd serves
+`org.finit.Device1` at `/org/finit/device` on its own brokerless bus,
+`unix:path=/run/keventd/bus`, the same way Finit serves
+[`org.finit`](dbus.md) on `/run/finit/bus`.  There is no forwarding
+between the two -- clients that want both connect to both.
+
+| Method        | In sig | Out sig | Priv. | Notes                                        |
+|---------------|--------|---------|-------|----------------------------------------------|
+| `Settle`      | `u`    | `b`     | no    | Wait until the event queue drains, timeout in seconds; `false` on timeout |
+| `Trigger`     | `ss`   | —       | yes   | Replay events: action, subsystem glob (empty = all) |
+| `Info`        | `s`    | `a{ss}` | no    | `/run/udev/data` properties for a devpath    |
+| `RulesReload` | —      | `u`     | yes   | Re-read the rules directories, returns rule count |
+
+| Property          | Sig | Notes                                     |
+|-------------------|-----|-------------------------------------------|
+| `QueueEmpty`      | `b` | No device events in flight                |
+| `SeqnumProcessed` | `t` | Highest kernel seqnum keventd has handled |
+
+| Signal            | Body                    | Fires when                      |
+|-------------------|-------------------------|---------------------------------|
+| `DeviceProcessed` | `ss` — devpath, action  | An event has been fully handled: node, symlinks, database |
+
+Example, wait up to ten seconds for the queue to drain:
+
+```sh
+dbus-send --address=unix:path=/run/keventd/bus \
+          --type=method_call --print-reply --dest=org.finit \
+          /org/finit/device org.finit.Device1.Settle uint32:10
+```
+
+In passive mode (`-p`) `Trigger` and `RulesReload` refuse -- device
+events are not handled here -- while `Settle` and the queue-state
+properties remain meaningful.
+
+keventd's conditions are symlinks to Finit's `reconf` generation
+marker, so they read the current generation by construction and never
+enter `flux` -- like user-defined conditions, they need no reassert
+after `initctl reload`.  Device state does not change because Finit
+re-read its configuration.
 
 
 Integration with Finit

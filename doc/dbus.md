@@ -22,6 +22,10 @@ Bus address
 | Local (always)         | `unix:path=/run/finit/bus`                  |
 | System (opportunistic) | `unix:path=/var/run/dbus/system_bus_socket` |
 
+The bundled device manager serves its own `org.finit.Device1` the same
+way on `unix:path=/run/keventd/bus`, see [keventd](keventd.md); one
+socket per daemon, no forwarding between them.
+
 The **local** bus is brokerless: clients connect straight to Finit over a
 Unix-domain socket using the standard D-Bus SASL EXTERNAL handshake.  No
 `dbus-daemon` is required, which makes it suitable for embedded systems that
@@ -133,6 +137,7 @@ All read-only strings; observable via `Properties.Get` and
 |-----------------------|----------------------------------------|------------------------|
 | `ServiceStateChanged` | `sss` — identity, old state, new state | Service transitions    |
 | `RunlevelChanged`     | `ss`  — old level, new level           | System runlevel change |
+| `ConfigReloaded`      | —                                      | `initctl reload` completed; external condition providers re-assert |
 
 State names emitted by `ServiceStateChanged` are stable wire strings:
 `halted`, `done`, `dead`, `cleanup`, `teardown`, `stopping`, `setup`,

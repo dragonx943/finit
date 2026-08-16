@@ -9,6 +9,9 @@ keventd_SOURCES    = keventd.c keventd.h uevent.c \
 		     rules.c rules.h \
 		     builtin.c builtin.h \
 		     $(top_srcdir)/src/util.c $(top_srcdir)/src/util.h
+# Per-target flags exist even when their conditional is false, so
+# assign the base unconditionally and append under DBUS
+keventd_CPPFLAGS   = $(AM_CPPFLAGS)
 keventd_CFLAGS     = -W -Wall -Wextra -std=gnu99
 # Silence noisy false positives from PATH_MAX-into-PATH_MAX sysfs path
 # concatenations; real concerns (e.g. USB strings into small buffers) are
@@ -20,6 +23,12 @@ keventd_CFLAGS    += $(blkid_CFLAGS)
 keventd_LDADD      = $(lite_LIBS)
 keventd_LDADD     += $(uev_LIBS)
 keventd_LDADD     += $(blkid_LIBS)
+
+if DBUS
+keventd_SOURCES   += dbus.c
+keventd_CPPFLAGS  += -I$(top_srcdir)/libink
+keventd_LDADD    += $(top_builddir)/libink/libink.la
+endif
 
 # Curated udev rules derived from eudev 3.2.14 (GPL-2.0-or-later).
 # Installed to /lib/udev/rules.d/ so existing third-party rules and

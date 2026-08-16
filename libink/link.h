@@ -293,6 +293,7 @@ const char *link_call_path     (const link_call_t *call);
 const char *link_call_interface(const link_call_t *call);
 const char *link_call_member   (const link_call_t *call);
 uid_t       link_call_uid      (const link_call_t *call);
+link_connection_t *link_call_connection(const link_call_t *call);
 
 /* ----------  reading method-call arguments  ----------
  *

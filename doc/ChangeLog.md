@@ -51,6 +51,13 @@ All relevant changes are documented in this file.
 - New `org.finit.Cond1` interface at `/org/finit/cond`: `Get`, `Set`,
   `Clear`, `List`, `Dump` for [user-defined conditions](conditions.md),
   with a `ConditionChanged (ss)` signal
+- keventd serves `org.finit.Device1` on its own bus at
+  `/run/keventd/bus`: `Settle`, `Trigger`, `Info`, `RulesReload`,
+  queue-state properties, and a `DeviceProcessed (ss)` signal.  The
+  `udevadm` settle/trigger/info equivalents are thereby bus methods
+  and `keventd -S` asks the running daemon first.  Finit also gained a
+  `Manager1.ConfigReloaded` signal, fired when `initctl reload`
+  completes, for external condition providers and monitoring
 - Privileged D-Bus methods accept root and members of the
   `--with-group` group; everyone else is refused.  On the local bus
   the caller's uid and groups come straight from the kernel

@@ -163,6 +163,22 @@ int             coldplug         (void);
 int             coldplug_trigger (const char *action, const char *subsys_glob);
 int             uevent_action_valid(const char *action);
 
+/* keventd.c: queue and rules state, for the D-Bus layer */
+unsigned long long kev_seq_processed(void);
+void            kev_seq_baseline (void);
+int             kev_queue_empty  (void);
+int             kev_rules_reload (void);
+
+#ifdef HAVE_DBUS
+#include <uev/uev.h>
+
+/* dbus.c: org.finit.Device1 on /run/keventd/bus */
+int             devbus_init      (uev_ctx_t *ctx, int passive);
+void            devbus_exit      (void);
+void            devbus_notify    (const char *devpath, const char *action);
+int             devbus_client_settle(int timeout_s);
+#endif
+
 #endif /* FINIT_KEVENTD_H_ */
 
 /**

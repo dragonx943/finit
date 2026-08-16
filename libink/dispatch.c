@@ -261,6 +261,7 @@ const char *link_call_path     (const link_call_t *c) { return c ? c->incoming.p
 const char *link_call_interface(const link_call_t *c) { return c ? c->incoming.interface : NULL; }
 const char *link_call_member   (const link_call_t *c) { return c ? c->incoming.member    : NULL; }
 uid_t       link_call_uid      (const link_call_t *c) { return c ? c->uid               : LINK_UID_UNKNOWN; }
+link_connection_t *link_call_connection(const link_call_t *c) { return c ? c->conn : NULL; }
 
 link_writer_t *link_call_reply(link_call_t *call)
 {

@@ -34,6 +34,8 @@
  * THE SOFTWARE.
  */
 
+#include "config.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <dirent.h>
@@ -304,6 +306,26 @@ static int applied_has_kmod(const struct uevent *ev)
 }
 
 /*
+ * Queue bookkeeping for the D-Bus Settle/QueueEmpty surface: the
+ * highest kernel seqnum keventd has fully handled.  The baseline is
+ * taken at bus init, events from before keventd started are not ours
+ * to wait for.
+ */
+static unsigned long long seq_processed;
+
+static void note_seqnum(const char *seqnum)
+{
+	unsigned long long seq;
+
+	if (!seqnum)
+		return;
+
+	seq = strtoull(seqnum, NULL, 10);
+	if (seq > seq_processed)
+		seq_processed = seq;
+}
+
+/*
  * Handle a single uevent from the kernel.
  */
 static void handle_uevent(char *buf, size_t len)
@@ -395,6 +417,12 @@ static void handle_uevent(char *buf, size_t len)
 			udevdb_write(&ev);
 	}
 
+	/* Fully handled: only now may QueueEmpty/Settle count it */
+	note_seqnum(ev.seqnum);
+#ifdef HAVE_DBUS
+	devbus_notify(ev.devpath, uevent_action_str(ev.action));
+#endif
+
 	uevent_env_free(&ev);
 }
 
@@ -485,8 +513,7 @@ static void sigterm_cb(uev_t *w, void *arg, int events)
 static void sighup_cb(uev_t *w, void *arg, int events)
 {
 	(void)w; (void)arg; (void)events;
-	rules_free(&rules);
-	rules_load_all(&rules, rules_dir);
+	kev_rules_reload();
 }
 
 static void sigchld_cb(uev_t *w, void *arg, int events)
@@ -550,23 +577,65 @@ static void uevent_cb(uev_t *w, void *arg, int events)
  * means "/dev is populated, persistent symlinks are live" rather
  * than just "listening on netlink".
  */
+/*
+ * Read the kernel's uevent sequence counter.  Shared by the coldplug
+ * gate, settle mode, and the D-Bus queue state.
+ */
+static int read_uevent_seqnum(unsigned long long *out)
+{
+	FILE *fp;
+	int rc;
+
+	fp = fopen("/sys/kernel/uevent_seqnum", "r");
+	if (!fp)
+		return -1;
+
+	rc = fscanf(fp, "%llu", out) == 1 ? 0 : -1;
+	fclose(fp);
+
+	return rc;
+}
+
+unsigned long long kev_seq_processed(void)
+{
+	return seq_processed;
+}
+
+void kev_seq_baseline(void)
+{
+	unsigned long long seq;
+
+	if (!read_uevent_seqnum(&seq) && seq > seq_processed)
+		seq_processed = seq;
+}
+
+int kev_queue_empty(void)
+{
+	unsigned long long seq;
+
+	if (read_uevent_seqnum(&seq))
+		return 1;	/* no counter, nothing to wait for */
+
+	return seq <= seq_processed;
+}
+
+int kev_rules_reload(void)
+{
+	rules_free(&rules);
+	return rules_load_all(&rules, rules_dir);
+}
+
 static void coldplug_pidfile_cb(uev_t *w, void *arg, int events)
 {
 	struct coldplug_gate *cg = arg;
 	unsigned long long cur = 0;
 	struct timespec now;
-	FILE *fp;
 	long dt_ms;
 
 	(void)events;
 
-	fp = fopen("/sys/kernel/uevent_seqnum", "r");
-	if (!fp)
+	if (read_uevent_seqnum(&cur))
 		return;
-
-	if (fscanf(fp, "%llu", &cur) != 1)
-		cur = cg->last_seq;
-	fclose(fp);
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 
@@ -610,17 +679,11 @@ static int cmd_settle(int timeout_s, int stable_ms)
 	last_change = start;
 
 	while (1) {
-		FILE *fp;
-
-		fp = fopen("/sys/kernel/uevent_seqnum", "r");
-		if (!fp) {
+		if (read_uevent_seqnum(&cur_seq)) {
 			fprintf(stderr, "keventd: cannot read uevent_seqnum: %s\n",
 				strerror(errno));
 			return 1;
 		}
-		if (fscanf(fp, "%llu", &cur_seq) != 1)
-			cur_seq = last_seq;
-		fclose(fp);
 
 		clock_gettime(CLOCK_MONOTONIC, &now);
 
@@ -736,8 +799,17 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (do_settle)
+	if (do_settle) {
+#ifdef HAVE_DBUS
+		/* Ask the running keventd, which tracks the queue where
+		 * the events flow; fall back to polling the kernel's
+		 * seqnum when no bus is up. */
+		int rc = devbus_client_settle(settle_timeout);
+		if (rc >= 0)
+			return rc;
+#endif
 		return cmd_settle(settle_timeout, 200);
+	}
 
 	if (!foreground) {
 		openlog("keventd", LOG_PID, LOG_DAEMON);
@@ -787,6 +859,12 @@ int main(int argc, char *argv[])
 	if (nlgroups && !passive)
 		rebc_init(nlgroups);
 
+#ifdef HAVE_DBUS
+	/* Bus up before coldplug so Settle covers the coldplug drain */
+	kev_seq_baseline();
+	devbus_init(&ctx, passive);
+#endif
+
 	/* Run coldplug if requested */
 	if (do_coldplug)
 		coldplug();
@@ -811,6 +889,9 @@ int main(int argc, char *argv[])
 
 	uev_run(&ctx, 0);
 
+#ifdef HAVE_DBUS
+	devbus_exit();
+#endif
 	if (rebc_fd != -1)
 		close(rebc_fd);
 	close(nlfd);
