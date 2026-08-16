@@ -247,10 +247,20 @@ typedef struct {
 	link_property_getter_fn getter;
 } link_property_t;
 
+/*
+ * Declares a signal for introspection only; emission is unchecked,
+ * see link_connection_emit_signal().
+ */
+typedef struct {
+	const char            *name;      /* member name */
+	const char            *sig;       /* D-Bus signature, e.g. "sss" */
+} link_signal_t;
+
 typedef struct {
 	const char            *interface;     /* e.g. "org.finit.Manager1" */
 	const link_method_t   *methods;       /* terminated by {NULL, ...}, or NULL */
 	const link_property_t *properties;    /* terminated by {NULL, ...}, or NULL */
+	const link_signal_t   *signals;       /* terminated by {NULL, ...}, or NULL */
 } link_vtable_t;
 
 /* Register one (interface, methods) at `path`.  Calling repeatedly

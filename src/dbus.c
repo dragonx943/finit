@@ -623,10 +623,17 @@ static const link_method_t manager_methods[] = {
 	{ NULL, NULL, NULL, 0, NULL }
 };
 
+static const link_signal_t manager_signals[] = {
+	{ .name = "ServiceStateChanged", .sig = "sss" },
+	{ .name = "RunlevelChanged",     .sig = "ss"  },
+	{ NULL, NULL }
+};
+
 static const link_vtable_t manager_vtable = {
 	.interface  = "org.finit.Manager1",
 	.methods    = manager_methods,
 	.properties = manager_properties,
+	.signals    = manager_signals,
 };
 
 /* ---------- org.finit.Service1 (one object per service) ----------
@@ -1251,9 +1258,15 @@ static const link_method_t cond_methods[] = {
 	{ NULL, NULL, NULL, 0, NULL }
 };
 
+static const link_signal_t cond_signals[] = {
+	{ .name = "ConditionChanged", .sig = "ss" },
+	{ NULL, NULL }
+};
+
 static const link_vtable_t cond_vtable = {
 	.interface = COND_INTERFACE,
 	.methods   = cond_methods,
+	.signals   = cond_signals,
 };
 
 /* ---------- signal emission: ConditionChanged ---------- */

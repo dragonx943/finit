@@ -67,7 +67,7 @@ Every node implements the usual stock interfaces:
 
 | Interface                             | Purpose                                   |
 |---------------------------------------|-------------------------------------------|
-| `org.freedesktop.DBus`                | `Hello`, `AddMatch`, `RemoveMatch`        |
+| `org.freedesktop.DBus`                | `Hello`, `AddMatch`, `RemoveMatch` — on `/org/freedesktop/DBus` only |
 | `org.freedesktop.DBus.Peer`           | `Ping`, `GetMachineId`                    |
 | `org.freedesktop.DBus.Introspectable` | `Introspect()` — XML description          |
 | `org.freedesktop.DBus.Properties`     | `Get`, `GetAll`; nothing is writable      |
