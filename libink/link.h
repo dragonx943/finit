@@ -293,6 +293,7 @@ uid_t       link_call_uid      (const link_call_t *call);
 int link_call_read_byte  (link_call_t *call, uint8_t  *out);
 int link_call_read_bool  (link_call_t *call, int      *out);
 int link_call_read_u32   (link_call_t *call, uint32_t *out);
+int link_call_read_u64   (link_call_t *call, uint64_t *out);
 int link_call_read_string(link_call_t *call, const char **out);  /* "s" */
 int link_call_read_path  (link_call_t *call, const char **out);  /* "o" */
 
@@ -434,6 +435,7 @@ ssize_t link_writer_finish(link_writer_t *w);
 void link_w_byte    (link_writer_t *w, uint8_t v);
 void link_w_bool    (link_writer_t *w, int v);
 void link_w_u32     (link_writer_t *w, uint32_t v);
+void link_w_u64     (link_writer_t *w, uint64_t v);      /* "t" */
 void link_w_string  (link_writer_t *w, const char *s);  /* "s" */
 void link_w_path    (link_writer_t *w, const char *s);  /* "o" */
 void link_w_variant_string(link_writer_t *w, const char *s); /* "v" containing "s" */
@@ -451,6 +453,7 @@ void   link_reader_init(link_reader_t *r, const uint8_t *body, size_t len);
 int    link_r_byte    (link_reader_t *r, uint8_t  *out);
 int    link_r_bool    (link_reader_t *r, int      *out);
 int    link_r_u32     (link_reader_t *r, uint32_t *out);
+int    link_r_u64     (link_reader_t *r, uint64_t *out);
 int    link_r_string  (link_reader_t *r, const char **out);  /* "s" */
 int    link_r_path    (link_reader_t *r, const char **out);  /* "o" */
 int    link_r_variant_begin (link_reader_t *r, char *type);       /* sig header, cursor at value */

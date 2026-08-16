@@ -79,6 +79,14 @@ void __w_u32(struct link_writer *w, uint32_t v)
 	put_u32(w, v);
 }
 
+void __w_u64(struct link_writer *w, uint64_t v)
+{
+	if (reserve(w, 8, 8) < 0)
+		return;
+	put_u32(w, (uint32_t)(v & 0xffffffffu));
+	put_u32(w, (uint32_t)(v >> 32));
+}
+
 static void write_lenprefixed(struct link_writer *w, const char *s, int onebyte_len)
 {
 	size_t len = s ? strlen(s) : 0;
@@ -230,6 +238,18 @@ int __r_u32(struct link_reader *r, uint32_t *out)
 	return 0;
 }
 
+int __r_u64(struct link_reader *r, uint64_t *out)
+{
+	if (r_skip_align(r, 8) < 0 || r->off + 8 > r->cap) {
+		r->err = 1;
+		return -1;
+	}
+	*out = (uint64_t)rd_u32(r->base + r->off)
+	     | ((uint64_t)rd_u32(r->base + r->off + 4) << 32);
+	r->off += 8;
+	return 0;
+}
+
 int __r_bool(struct link_reader *r, int *out)
 {
 	uint32_t v;
@@ -327,6 +347,13 @@ int __r_skip_basic(struct link_reader *r, char type)
 	case 'u':
 	case 'i':
 		return __r_u32(r, &u);
+	case 't':
+	case 'x':
+	case 'd': {
+		uint64_t t;
+
+		return __r_u64(r, &t);
+	}
 	case 'y':
 		return __r_byte(r, &y);
 	default:
@@ -395,6 +422,9 @@ ssize_t __marshal_va(uint8_t *body, size_t cap, const char *sig, va_list ap)
 			break;
 		case 'u':
 			__w_u32(&w, va_arg(ap, uint32_t));
+			break;
+		case 't':
+			__w_u64(&w, va_arg(ap, uint64_t));
 			break;
 		case 's':
 			__w_string(&w, va_arg(ap, const char *));

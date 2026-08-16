@@ -287,6 +287,7 @@ int link_call_reply_error(link_call_t *call, const char *name, const char *messa
 int link_call_read_byte  (link_call_t *c, uint8_t *o)        { return __r_byte  (&c->read_cursor, o); }
 int link_call_read_bool  (link_call_t *c, int *o)            { return __r_bool  (&c->read_cursor, o); }
 int link_call_read_u32   (link_call_t *c, uint32_t *o)       { return __r_u32   (&c->read_cursor, o); }
+int link_call_read_u64   (link_call_t *c, uint64_t *o)       { return __r_u64   (&c->read_cursor, o); }
 int link_call_read_string(link_call_t *c, const char **o)    { return __r_string(&c->read_cursor, o); }
 int link_call_read_path  (link_call_t *c, const char **o)    { return __r_path  (&c->read_cursor, o); }
 
@@ -298,6 +299,7 @@ ssize_t link_writer_finish(link_writer_t *w)                           { return 
 void link_w_byte    (link_writer_t *w, uint8_t v)        { __w_byte(w, v); }
 void link_w_bool    (link_writer_t *w, int v)            { __w_bool(w, v); }
 void link_w_u32     (link_writer_t *w, uint32_t v)       { __w_u32(w, v);  }
+void link_w_u64     (link_writer_t *w, uint64_t v)       { __w_u64(w, v);  }
 void link_w_string  (link_writer_t *w, const char *s)    { __w_string(w, s); }
 void link_w_path    (link_writer_t *w, const char *s)    { __w_path(w, s);   }
 void link_w_variant_string(link_writer_t *w, const char *s) { __w_variant_string(w, s); }
@@ -312,6 +314,7 @@ void link_reader_init(link_reader_t *r, const uint8_t *body, size_t len) { __r_i
 int  link_r_byte  (link_reader_t *r, uint8_t  *o)     { return __r_byte  (r, o); }
 int  link_r_bool  (link_reader_t *r, int      *o)     { return __r_bool  (r, o); }
 int  link_r_u32   (link_reader_t *r, uint32_t *o)     { return __r_u32   (r, o); }
+int  link_r_u64   (link_reader_t *r, uint64_t *o)     { return __r_u64   (r, o); }
 int  link_r_string(link_reader_t *r, const char **o)  { return __r_string(r, o); }
 int  link_r_path  (link_reader_t *r, const char **o)  { return __r_path  (r, o); }
 int  link_r_variant_begin (link_reader_t *r, char *type)     { return __r_variant_begin(r, type); }
