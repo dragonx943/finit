@@ -233,6 +233,7 @@ static void bypass_shutdown(void *unused)
 	do_shutdown(halt);
 }
 
+
 /*
  * Handle switch_root API command.
  * Parses data: "newroot\0newinit\0"
@@ -370,8 +371,8 @@ static void api_cb(uev_t *w, void *arg, int events)
 {
 	static svc_t *iter = NULL;
 	struct init_request rq;
-	int sd, lvl;
 	svc_t *svc;
+	int sd;
 
 	(void)arg;
 
@@ -446,14 +447,6 @@ static void api_cb(uev_t *w, void *arg, int events)
 
 		switch (rq.cmd) {
 		case INIT_CMD_RUNLVL:
-			/* Allow changing cfglevel in runlevel S */
-			if (IS_RESERVED_RUNLEVEL(runlevel)) {
-				if (runlevel != INIT_LEVEL) {
-					warnx("Cannot abort runlevel 6/0.");
-					break;
-				}
-			}
-
 			switch (rq.runlevel) {
 			case 's':
 			case 'S':
@@ -462,17 +455,7 @@ static void api_cb(uev_t *w, void *arg, int events)
 
 			case '0'...'9':
 				dbg("Setting new runlevel %c", rq.runlevel);
-				lvl = rq.runlevel - '0';
-				if (lvl == 0)
-					halt = SHUT_OFF;
-				if (lvl == 6)
-					halt = SHUT_REBOOT;
-
-				/* User requested change in next runlevel */
-				if (runlevel == INIT_LEVEL)
-					cfglevel = lvl;
-				else
-					sm_runlevel(lvl);
+				sm_request_runlevel(rq.runlevel - '0');
 				break;
 
 			default:

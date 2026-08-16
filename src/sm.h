@@ -35,6 +35,7 @@ void sm_step      (void);
 int  sm_in_reload (void);
 void sm_reload    (void);
 void sm_runlevel  (int newlevel);
+void sm_request_runlevel(int lvl);
 
 #endif	/* FINIT_SM_H_ */
 

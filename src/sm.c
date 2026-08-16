@@ -95,6 +95,30 @@ static void shutdown_wdt_cb(uev_t *w, void *arg, int events)
 }
 
 /*
+ * User-requested runlevel change, shared by the legacy API and the
+ * D-Bus SetRunlevel method.  Refused in runlevel 0/6, deferred via
+ * cfglevel during bootstrap.
+ */
+void sm_request_runlevel(int lvl)
+{
+	if (IS_RESERVED_RUNLEVEL(runlevel) && runlevel != INIT_LEVEL) {
+		warnx("Cannot abort runlevel 6/0.");
+		return;
+	}
+
+	if (lvl == 0)
+		halt = SHUT_OFF;
+	if (lvl == 6)
+		halt = SHUT_REBOOT;
+
+	/* Runlevel S: user requested change in next runlevel */
+	if (runlevel == INIT_LEVEL)
+		cfglevel = lvl;
+	else
+		sm_runlevel(lvl);
+}
+
+/*
  * Console input callback - handles Ctrl-C during bootstrap wait
  */
 static void console_input_cb(uev_t *w, void *arg, int events)

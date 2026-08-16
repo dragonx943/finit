@@ -454,9 +454,7 @@ static int manager_set_runlevel(link_call_t *call, void *userdata)
 			"org.freedesktop.DBus.Error.InvalidArgs",
 			"runlevel must be 0-9 (excluding internal levels)");
 
-	if (lvl == 0) halt = SHUT_OFF;
-	if (lvl == 6) halt = SHUT_REBOOT;
-	sm_runlevel((int)lvl);
+	sm_request_runlevel((int)lvl);
 
 	(void)link_call_reply(call);
 	return 0;
