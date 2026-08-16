@@ -16,7 +16,7 @@ jobs:
     outputs:
       run: ${{ steps.schedule.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check for any commits since last week
         id: schedule
         run: |
@@ -42,7 +42,7 @@ jobs:
           (cd libuev-2.4.1 && ./configure && make -j9 && sudo make install-strip)
           (cd libite-2.6.2 && ./configure && make -j9 && sudo make install-strip)
           sudo ldconfig
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Base run
         run: |
           ./autogen.sh
@@ -61,7 +61,7 @@ jobs:
           make -j1 distcheck || (cat $dir/test/test-suite.log; false)
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: finit-weekly-test-logs
           path: finit-*/_build/sub/test/*.log

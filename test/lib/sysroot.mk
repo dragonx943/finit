@@ -36,11 +36,23 @@ BBURL          ?= $(BBHOME)/$(BBVER)/$(BBBIN)
 
 # glibc dlopen()s NSS modules at runtime, so ldd does not list them, but
 # without libnss_files getpwnam() cannot resolve users inside the chroot
-_libs_nss       = $(firstword $(wildcard /lib/$(ARCH)-linux-gnu/libnss_files.so.2 \
+_libs_nss      := $(firstword $(wildcard /lib/$(ARCH)-linux-gnu/libnss_files.so.2 \
                                          /usr/lib/$(ARCH)-linux-gnu/libnss_files.so.2 \
                                          /lib64/libnss_files.so.2 /lib/libnss_files.so.2))
-_libs_src       = $(shell ldd $(FINITBIN) | grep -Eo '/[^ ]+') $(_libs_nss)
-libs            = $(foreach path,$(_libs_src),$(abspath $(DEST))$(path))
+# A real broker and a real client, staged when the host has them, so
+# one test can check Finit against dbus-daemon instead of only against
+# libink's own client.  Absent is fine, dbus-broker.sh skips.
+dbus_bins      := $(foreach b,dbus-daemon dbus-send,$(firstword $(wildcard /usr/bin/$(b) /bin/$(b))))
+# Given several binaries ldd prefixes each with a 'path:' header, and
+# that trailing colon would land in a make target.  Excluding it here
+# is enough, no need for one ldd per binary.
+_libs_dbus     := $(if $(dbus_bins),$(shell ldd $(dbus_bins) | grep -Eo '/[^ :]+'))
+
+# The binaries stage exactly like the libraries: same host path, same
+# path under DEST, copied by the rule below.
+_libs_src      := $(shell ldd $(FINITBIN) | grep -Eo '/[^ ]+') $(_libs_nss) \
+                  $(_libs_dbus) $(dbus_bins)
+libs           := $(foreach path,$(sort $(_libs_src)),$(abspath $(DEST))$(path))
 
 all: $(libs) $(DEST)/bin/$(BBBIN)
 	@(cd $(DEST);					\

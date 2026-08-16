@@ -1,5 +1,16 @@
 ACLOCAL_AMFLAGS    = -I m4
-SUBDIRS            = man plugins src system tmpfiles.d
+
+# libink must precede src in SUBDIRS because finit links against
+# libink at build time.  Automake recurses subdirs strictly in
+# declaration order, so the typical "explicit dependency" pattern
+# (foo: bar) doesn't help here — ordering is the only thing that
+# does.  libsystemd is consumed by test/serv only, so its position
+# after src is fine.
+SUBDIRS            = man plugins
+if DBUS
+SUBDIRS           += libink dbus-1
+endif
+SUBDIRS           += src system tmpfiles.d
 dist_doc_DATA      = README.md LICENSE contrib/finit.conf
 
 if CONTRIB
@@ -23,6 +34,13 @@ endif
 # Compat hook
 install-dev:
 	@make -C src install-pkgincludeHEADERS
+
+# The fuzz target is built by hand with clang (doc/build.md), so it is
+# not in any _PROGRAMS and nothing else would clear it or the corpus
+# it grows.
+distclean-local:
+	-rm -f  $(top_builddir)/fuzz-msg-parse
+	-rm -rf $(top_builddir)/.fuzz-corpus
 
 # Target to run when building a release
 release: distcheck

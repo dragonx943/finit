@@ -3,3 +3,5 @@
 /.libs/
 /.deps/
 /serv
+/dbus-auth-client
+/fuzz-msg-parse

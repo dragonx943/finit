@@ -52,3 +52,8 @@ GTAGS
 
 # VS Code user settings
 .vscode
+
+# Fuzzing: the target is built by hand with clang, see doc/build.md,
+# and the corpus it grows is a local artefact, not something to ship
+/fuzz-msg-parse
+/.fuzz-corpus/

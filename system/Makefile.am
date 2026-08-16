@@ -7,6 +7,10 @@ if BUILD_HOTPLUG_PLUGIN
 system_DATA      += 10-hotplug.conf
 endif
 
+if BUILD_DBUS_PLUGIN
+dist_system_DATA += 20-dbus.conf
+endif
+
 if BUILD_TESTSERV_PLUGIN
 dist_system_DATA += 90-testserv.conf
 endif

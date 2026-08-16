@@ -18,6 +18,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install pkg-config libconfuse-dev clang
+          # clang picks the newest gcc tree it finds and needs the
+          # matching libstdc++ headers to link the fuzzer runtime
+          sudo apt-get -y install libstdc++-14-dev || true
+          wget https://github.com/troglobit/libuev/releases/download/v2.4.1/libuev-2.4.1.tar.xz
+          wget https://github.com/troglobit/libite/releases/download/v2.6.2/libite-2.6.2.tar.gz
+          tar xf libuev-2.4.1.tar.xz
+          tar xf libite-2.6.2.tar.gz
+          (cd libuev-2.4.1 && ./configure && make -j9 && sudo make install-strip)
+          (cd libite-2.6.2 && ./configure && make -j9 && sudo make install-strip)
+          sudo ldconfig
+      - uses: actions/checkout@v7
+      - name: Configure
+        run: |
+          ./autogen.sh
+          ./configure --prefix=/usr --exec-prefix= --sysconfdir=/etc --localstatedir=/var
+      - name: Build fuzz target
+        run: |
+          clang -fsanitize=fuzzer,address -DLINK_FUZZ_LIBFUZZER -D_GNU_SOURCE \
+                -I libink -I . -o fuzz-msg-parse                              \
+                test/src/fuzz-msg-parse.c libink/*.c
+      # Restores the newest corpus and saves a fresh one, since a cache
+      # entry is immutable once written.  Caches made on a branch are
+      # private to it, so the corpus that accumulates on master is what
+      # pull requests start from, rather than nothing.
+      - name: Restore corpus
+        uses: actions/cache@v6
+        with:
+          path: .fuzz-corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz
+        run: |
+          mkdir -p .fuzz-corpus
+          ./fuzz-msg-parse .fuzz-corpus -max_total_time=120 -max_len=4096 \
+                           -print_final_stats=1
+      # Without this the corpus only ever grows, and most of what it
+      # accumulates reaches code some earlier input already reached.
+      - name: Minimise corpus
+        if: always()
+        run: |
+          mkdir -p .fuzz-corpus-min
+          ./fuzz-msg-parse -merge=1 .fuzz-corpus-min .fuzz-corpus
+          rm -rf .fuzz-corpus
+          mv .fuzz-corpus-min .fuzz-corpus
+          echo "corpus: $(ls .fuzz-corpus | wc -l) inputs"
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crashers
+          path: |
+            crash-*
+            leak-*
+            timeout-*
+          if-no-files-found: ignore
+
   build:
     # Verify we can build on latest Ubuntu with both gcc and clang
     name: ${{ matrix.compiler }}
@@ -42,7 +107,7 @@ jobs:
           (cd libuev-2.4.1 && ./configure && make -j9 && sudo make install-strip)
           (cd libite-2.6.2 && ./configure && make -j9 && sudo make install-strip)
           sudo ldconfig
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Static Finit
         run: |
           ./autogen.sh
@@ -52,7 +117,7 @@ jobs:
         run: |
           ./configure --prefix=/usr --exec-prefix= --sysconfdir=/etc --localstatedir=/var \
                       --enable-x11-common-plugin --enable-testserv-plugin --with-watchdog \
-                      --with-keventd --with-libsystemd \
+                      --with-keventd \
                       CFLAGS="-fsanitize=address -ggdb"
           make -j9 clean
           make -j9 V=1
@@ -80,7 +145,7 @@ jobs:
           make -j1 check || (cat test/test-suite.log; false)
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: finit-test-${{ matrix.compiler }}
           path: test/*.log

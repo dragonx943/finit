@@ -50,9 +50,18 @@ Below are a few of the main switches to configure:
   `/proc/cmdline`, this is *not recommended* since Finit may be running as the
   init for container apps that can see the host's `/proc` filesystem
 
+* `--disable-dbus`: Opt out of Finit's built-in D-Bus support, enabled by
+  default.  See [D-Bus Integration](dbus.md) for what it provides.  Not to
+  be confused with `--disable-dbus-plugin` below, which only governs
+  starting an external `dbus-daemon`
+
 * `--enable-alsa-utils-plugin`: Enable the optional `alsa-utils.so` sound plugin.
 
-* `--enable-dbus-plugin`: Enable the optional D-Bus `dbus.so` plugin.
+* `--disable-dbus-plugin`: Drop the `dbus.so` plugin, which launches
+  `dbus-daemon` at boot.  Enabled by default; the plugin does nothing on
+  a system that has no `dbus-daemon` installed, so opting out is only
+  needed to keep init from starting a bus on a system that has one.
+  Unrelated to the built-in bus, see `--disable-dbus` above.
 
 * `--enable-resolvconf-plugin`: Enable the `resolvconf.so` optional plugin.
 
@@ -114,6 +123,60 @@ Linux config to:
 > One of the most common problems is a custom Linux kernel build that
 > lack `CONFIG_DEVTMPFS`.  Another is too much cruft in the system
 > `/etc/fstab`.
+
+
+Testing
+-------
+
+`make check` runs the test suite in a private namespace, so it is safe
+on a running system.  It needs `unshare` and, on Ubuntu, unprivileged
+user namespaces enabled:
+
+```shell
+sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0
+make check
+```
+
+The D-Bus message parser is the only place in Finit where bytes off a
+socket become pointers, so it also has a fuzz target.  `make check`
+runs it as a fixed sweep, which takes milliseconds and needs nothing
+beyond the normal build.  To fuzz it properly, build it with clang and
+libFuzzer:
+
+```shell
+clang -fsanitize=fuzzer,address -DLINK_FUZZ_LIBFUZZER -D_GNU_SOURCE \
+      -I libink -I . -o fuzz-msg-parse                              \
+      test/src/fuzz-msg-parse.c libink/*.c
+mkdir -p .fuzz-corpus
+./fuzz-msg-parse .fuzz-corpus -max_total_time=300
+```
+
+Give it a corpus directory as above and it saves what it learns there,
+so the next run picks up where this one left off instead of starting
+cold.  Nothing writes to it unless you name it: without the argument
+libFuzzer keeps everything in memory and the run leaves only crashes
+behind.  `make distclean` clears the corpus and the target.
+
+Once a corpus has grown, most of it reaches code some earlier input
+already reached.  Minimise it:
+
+```shell
+./fuzz-msg-parse -merge=1 .fuzz-corpus-min .fuzz-corpus
+rm -rf .fuzz-corpus && mv .fuzz-corpus-min .fuzz-corpus
+```
+
+Run `./configure` first, the target needs the generated `config.h`.
+If the link fails with `cannot find -lstdc++`, install the `libstdc++`
+headers matching the newest GCC on the system, not the default one:
+clang picks the newest tree it finds, and that is the one that needs
+them.  CI runs this target on every pull request, carrying its
+corpus between runs so it reaches deeper over time.
+
+Feed a file back to the target to reproduce a find:
+
+```shell
+./fuzz-msg-parse crash-3f2a...
+```
 
 
 Running

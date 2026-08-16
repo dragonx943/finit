@@ -35,7 +35,10 @@ For your convenience a set of *optional* plugins are available:
 > the `/etc/fstab` file and in the Linux kernel config.
 
 * *dbus.so*: Setup and start system message bus, D-Bus, at boot.
-  _Optional plugin._
+  Enabled by default, and a no-op on systems without a `dbus-daemon`.
+  The daemon is declared in `20-dbus.conf` and its directories in
+  `tmpfiles.d/dbus.conf`, both overridable from `/etc`; the plugin
+  itself only handles what has to inspect the running system.
 
 * *hook-scripts.so*: Trigger the execution of scripts from plugin hook
   points (see [Hooks](#hooks)).  _Optional plugin._

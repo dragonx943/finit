@@ -8,6 +8,14 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- The `dbus.so` plugin, which starts an external `dbus-daemon`, is now
+  enabled by default.  It does nothing on systems without a
+  `dbus-daemon` installed, and `--disable-dbus-plugin` opts out.  The
+  daemon it used to register from C now lives in `20-dbus.conf`, and
+  the directories it needs in `tmpfiles.d/dbus.conf`, so both can be
+  overridden from `/etc` like any other system file.  Those
+  directories are no longer chowned to `messagebus`, matching how
+  Finit ships directories for other daemons
 - The `tty` block takes `passenv`, which the line-based format has had
   since v4.4 (issue #286) and the block format was missing
 - New `provides` setting for run/task/service/sysv blocks, naming
@@ -20,6 +28,60 @@ All relevant changes are documented in this file.
   same service, `command = { "/lib/systemd/systemd-udevd", "-udevd" }`,
   and Finit starts the first one it finds.  The line-based format could
   only express this by repeating the whole stanza per candidate
+- Finit now ships with a built-in brokerless D-Bus implementation,
+  **libink**, exposing the running init system as a peer on its own
+  private bus at `/run/finit/bus`, and -- opportunistically --
+  registering `org.finit` on the standard system bus when a
+  `dbus-daemon` is reachable.  No external `libdbus`/`sd-bus`/`GIO`
+  dependency.
+
+  The bus implements the stock `org.freedesktop.DBus`,
+  `org.freedesktop.DBus.Peer`, `org.freedesktop.DBus.Introspectable`,
+  and `org.freedesktop.DBus.Properties` interfaces, plus three
+  Finit-specific ones:
+
+    * `org.finit.Manager1` at `/org/finit/manager` --
+      `ListServices`, `GetService`, `Start`/`Stop`/`Restart`/`Reload`,
+      `SetRunlevel`, `SetDebug`, `Signal`, `Suspend`, and the
+      `Reboot`/`Halt`/`Poweroff` triplet.  Read-only properties
+      `Runlevel`, `PrevRunlevel`, `Version`.  Signals
+      `ServiceStateChanged (sss)` and `RunlevelChanged (ss)`.
+
+    * `org.finit.Service1` at `/org/finit/service/<encoded>` -- one
+      object per loaded service, with `Start`/`Stop`/`Restart`/`Reload`
+      for working off an object handle rather than passing the
+      identity string around.
+
+    * `org.finit.Cond1` at `/org/finit/cond` -- `Get`, `Set`, `Clear`,
+      `List`, `Dump` for [user-defined conditions](conditions.md),
+      with a `ConditionChanged (ss)` signal.
+
+  Privileged methods accept root and members of the `--with-group`
+  group; everyone else is refused.  On the local bus the caller's uid
+  and groups come straight from the kernel (`SO_PEERCRED` +
+  `SO_PEERGROUPS`), so the check never blocks PID 1 on an NSS lookup.
+  Over the system bus the uid is resolved from the broker
+  (`GetConnectionUnixUser`) and privileged methods are root-only.
+  Read-only methods are open.
+  See [D-Bus Integration](dbus.md) for the full surface, build flag,
+  and `dbus-send`/`dbus-monitor` examples.
+
+- `initctl` now transparently routes through D-Bus when the bus is
+  reachable, with the legacy `INIT_SOCKET` transport as a fallback:
+  `start`, `stop`, `restart`, `reload`, `reload <svc>`, `reboot`,
+  `halt`, `poweroff`, `suspend`, `debug`, `signal`, `runlevel`, and
+  `cond {get,set,clr}` all use the new path.  Two new subcommands
+  show up that have no legacy equivalent:
+
+    * `initctl monitor` -- streams every signal on the bus to the
+      terminal, one line per delivery (`HH:MM:SS iface.member(args)`),
+      until interrupted.  Same idea as `dbus-monitor`, but scoped to
+      Finit and with no address plumbing required.
+
+    * Issuing `initctl cond set/clr` over D-Bus also fires the
+      `Cond1.ConditionChanged` signal, so observers see user-driven
+      state changes the same way they see service-driven ones.
+
 - Restart log now spells out the signal name and flags core dumps,
   e.g. `killed by SIGKILL` or `killed by SIGSEGV, core dumped`, in
   place of the bare numeric `by signal: N`.  Gives operators a much
