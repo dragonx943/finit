@@ -535,6 +535,10 @@ static int manager_signal(link_call_t *call, void *u)
 static int manager_suspend(link_call_t *call, void *u)
 {
 	(void)u;
+	if (IS_RESERVED_RUNLEVEL(runlevel))
+		return link_call_reply_error(call,
+			"org.finit.Error.WrongRunlevel",
+			"Unsupported command in runlevel S and 6/0");
 	sync();
 	if (suspend() < 0) {
 		const char *msg = (errno == EINVAL)
