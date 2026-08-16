@@ -626,6 +626,7 @@ static const link_method_t manager_methods[] = {
 static const link_signal_t manager_signals[] = {
 	{ .name = "ServiceStateChanged", .sig = "sss" },
 	{ .name = "RunlevelChanged",     .sig = "ss"  },
+	{ .name = "ConfigReloaded",      .sig = ""    },
 	{ NULL, NULL }
 };
 
@@ -1040,6 +1041,18 @@ void dbus_notify_runlevel_change(int old_level, int new_level)
 
 	dbus_emit_signal("/org/finit/manager", "org.finit.Manager1",
 			 "RunlevelChanged", "ss", body, (size_t)blen);
+}
+
+/*
+ * Reconfiguration complete: all conditions have been re-asserted by
+ * their in-Finit owners.  External providers whose conditions are
+ * generation files, rather than the oneshot symlinks keventd uses,
+ * subscribe to this to re-assert theirs.
+ */
+void dbus_notify_reload(void)
+{
+	dbus_emit_signal("/org/finit/manager", "org.finit.Manager1",
+			 "ConfigReloaded", "", NULL, 0);
 }
 
 /* ---------- org.finit.Cond1 ---------- */

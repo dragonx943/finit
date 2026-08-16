@@ -633,6 +633,9 @@ restart:
 		service_step_all(SVC_TYPE_ANY);
 
 		dbg("Reconfiguration done");
+#ifdef HAVE_DBUS
+		dbus_notify_reload();
+#endif
 		sm.state = SM_RUNNING_STATE;
 		break;
 	}

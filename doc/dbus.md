@@ -137,7 +137,7 @@ All read-only strings; observable via `Properties.Get` and
 |-----------------------|----------------------------------------|------------------------|
 | `ServiceStateChanged` | `sss` — identity, old state, new state | Service transitions    |
 | `RunlevelChanged`     | `ss`  — old level, new level           | System runlevel change |
-| `ConfigReloaded`      | —                                      | `initctl reload` completed; external condition providers re-assert |
+| `ConfigReloaded`      | —                                      | `initctl reload` completed; providers of generation-file conditions re-assert |
 
 State names emitted by `ServiceStateChanged` are stable wire strings:
 `halted`, `done`, `dead`, `cleanup`, `teardown`, `stopping`, `setup`,

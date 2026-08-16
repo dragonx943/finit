@@ -133,3 +133,8 @@ case "$(cat /tmp/dbus-devauthz.out)" in
     *AccessDenied*) assert "Device1 authz fires" 0 -eq 0 ;;
     *) fail "Unexpected reply: $(cat /tmp/dbus-devauthz.out)" ;;
 esac
+
+say "Conditions are generation symlinks, unaffected by initctl reload"
+run "initctl reload"
+retry 'assert_cond "class/net/dummy0"'
+assert "class/net/dummy0 still asserted after reload" 0 -eq 0

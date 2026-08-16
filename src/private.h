@@ -54,6 +54,7 @@ void         dbus_unregister_service   (svc_t *svc);
 void         dbus_notify_service_state (svc_t *svc, int old_state, int new_state);
 void         dbus_notify_condition_change(const char *name, const char *state);
 void         dbus_notify_runlevel_change(int old_level, int new_level);
+void         dbus_notify_reload         (void);
 #endif
 void         conf_flush_events(void);
 
