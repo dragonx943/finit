@@ -488,11 +488,9 @@ static int signal_one(svc_t *svc, void *udata)
 {
 	int signo = *(int *)udata;
 
-	/* Silently skip stopped services -- a multi-match ident
-	 * (e.g. "sshd:*") should not fail the whole call just because
-	 * one of the matches happens to be in a halted state. */
+	/* Signalling a stopped service is an error, like the legacy API */
 	if (!svc_is_running(svc))
-		return 0;
+		return 1;
 	return !!kill(svc->pid, signo);
 }
 
