@@ -170,7 +170,7 @@ switch_root_fail(char *errbuf, size_t errbuflen, int err, const char *fmt, ...)
 int switch_root_precheck(const char *newroot, const char *newinit,
 			 char *errbuf, size_t errbuflen)
 {
-	struct stat newroot_st, oldroot_st;
+	struct stat newroot_st, oldroot_st, st;
 	char init_path[PATH_MAX];
 	int fd;
 
@@ -218,11 +218,26 @@ int switch_root_precheck(const char *newroot, const char *newinit,
 		return switch_root_fail(errbuf, errbuflen, EINVAL,
 					 "%s is not a mount point", newroot);
 
-	/* Verify init exists in new root */
-	snprintf(init_path, sizeof(init_path), "%s%s", newroot, newinit);
+	/* Verify init exists in new root and is a regular file */
+	if (paste(init_path, sizeof(init_path),
+		  newroot, newinit) >= (int)sizeof(init_path))
+		return switch_root_fail(errbuf, errbuflen, ENAMETOOLONG,
+					 "init path too long");
+
 	if (access(init_path, X_OK))
 		return switch_root_fail(errbuf, errbuflen, ENOENT,
 					 "%s not found or not executable", init_path);
+
+	if (stat(init_path, &st))
+		return switch_root_fail(errbuf, errbuflen, errno,
+					 "cannot stat %s: %s", init_path, strerror(errno));
+	if (S_ISDIR(st.st_mode))
+		return switch_root_fail(errbuf, errbuflen, EISDIR,
+					 "%s is a directory, not init", init_path);
+
+	if (!S_ISREG(st.st_mode))
+		return switch_root_fail(errbuf, errbuflen, ENOEXEC,
+					 "%s is not a regular file", init_path);
 
 	return 0;
 }
