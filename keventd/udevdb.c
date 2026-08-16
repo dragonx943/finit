@@ -38,9 +38,6 @@
 #include "sysfs.h"
 #include "udevdb.h"
 
-/* Forward declaration from keventd.c */
-void logit(int prio, const char *fmt, ...);
-
 /*
  * Compute the database file path for a device.
  *
@@ -174,11 +171,6 @@ int udevdb_read(struct uevent *ev)
 	return udevdb_load(path, ev);
 }
 
-/*
- * Read the parent device's properties into ev's env store, for
- * IMPORT{parent} in the rules engine.  The parent has no uevent to key
- * from, so its device ID is composed from sysfs (see udevdb_path()).
- */
 /*
  * Read E: records for any devpath, keyed from its sysfs attributes:
  * the device has no uevent in hand, so major:minor, ifindex, and

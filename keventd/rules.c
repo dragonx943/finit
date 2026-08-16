@@ -51,9 +51,6 @@
 #include "sysfs.h"
 #include "udevdb.h"
 
-/* Forward declaration from keventd.c */
-void logit(int prio, const char *fmt, ...);
-
 /* ----- key-name lookup -------------------------------------------------- */
 
 static const struct {

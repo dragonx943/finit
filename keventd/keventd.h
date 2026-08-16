@@ -135,7 +135,6 @@ struct dev_symlink {
 };
 
 /* Function prototypes - uevent.c */
-void            rule_ctx_free    (struct rule_ctx *ctx);
 
 int             uevent_parse     (char *buf, size_t len, struct uevent *ev);
 const char     *uevent_action_str(uevent_action_t action);
@@ -149,6 +148,7 @@ int             devnode_add      (struct uevent *ev);
 int             devnode_del      (struct uevent *ev);
 int             netdev_add       (struct uevent *ev);
 
+void            cond_emit        (const char *prefix, const char *rel, int set);
 void            class_cond       (const struct uevent *ev, int set);
 void            driver_cond      (const struct uevent *ev, int set);
 
@@ -163,9 +163,11 @@ int             coldplug         (void);
 int             coldplug_trigger (const char *action, const char *subsys_glob);
 int             uevent_action_valid(const char *action);
 
-/* keventd.c: queue and rules state, for the D-Bus layer */
+/* keventd.c: logging and queue/rules state, for all of keventd */
+void            logit            (int prio, const char *fmt, ...)
+	__attribute__((format(printf, 2, 3)));
+uint64_t        kev_now_ms       (void);
 unsigned long long kev_seq_processed(void);
-void            kev_seq_baseline (void);
 int             kev_queue_empty  (void);
 int             kev_rules_reload (void);
 

@@ -55,9 +55,6 @@
 #include "sysfs.h"
 #include "util.h"
 
-/* Forward declarations */
-void logit(int prio, const char *fmt, ...);
-
 /*
  * Set/clear a Finit condition by creating/removing a symlink.
  * keventd is a standalone daemon, so we manipulate the filesystem directly
@@ -67,7 +64,7 @@ void logit(int prio, const char *fmt, ...);
  * COND_DRIVER, ...) ending in '/'.  rel is the relative path under that
  * namespace (e.g. "sda", "input/event0", "net/eth0", "mt7530").
  */
-static void cond_emit(const char *prefix, const char *rel, int set)
+void cond_emit(const char *prefix, const char *rel, int set)
 {
 	char cond[PATH_MAX];
 	char *dir;
@@ -437,7 +434,7 @@ int uevent_setenv(struct uevent *ev, const char *key, const char *val)
 	return 0;
 }
 
-void rule_ctx_free(struct rule_ctx *ctx)
+static void rule_ctx_free(struct rule_ctx *ctx)
 {
 	int i;
 
@@ -713,28 +710,6 @@ static int symlink_create(const char *target, const char *link, const char *devp
 }
 
 /*
- * Read a single line from a sysfs attribute file.
- */
-static int sysfs_read(const char *path, char *buf, size_t len)
-{
-	FILE *fp;
-
-	fp = fopen(path, "r");
-	if (!fp)
-		return -1;
-
-	if (!fgets(buf, len, fp)) {
-		fclose(fp);
-		return -1;
-	}
-
-	fclose(fp);
-	chomp(buf);
-
-	return 0;
-}
-
-/*
  * Build disk ID string from sysfs attributes.
  * Format: BUSTYPE-VENDOR_MODEL_SERIAL
  */
@@ -746,16 +721,16 @@ static int disk_serial_id(struct uevent *ev, char *id, size_t len)
 
 	/* Try to read from device's sysfs attributes */
 	snprintf(path, sizeof(path), "/sys%s/device/vendor", ev->devpath);
-	sysfs_read(path, vendor, sizeof(vendor));
+	sysfs_read_file(path, vendor, sizeof(vendor));
 
 	snprintf(path, sizeof(path), "/sys%s/device/model", ev->devpath);
-	sysfs_read(path, model, sizeof(model));
+	sysfs_read_file(path, model, sizeof(model));
 
 	snprintf(path, sizeof(path), "/sys%s/device/serial", ev->devpath);
-	if (sysfs_read(path, serial, sizeof(serial))) {
+	if (sysfs_read_file(path, serial, sizeof(serial))) {
 		/* Try alternate location */
 		snprintf(path, sizeof(path), "/sys%s/../serial", ev->devpath);
-		sysfs_read(path, serial, sizeof(serial));
+		sysfs_read_file(path, serial, sizeof(serial));
 	}
 
 	/* Need at least model or serial */
@@ -862,7 +837,7 @@ static int symlink_add_input(struct uevent *ev)
 
 	/* Read device name */
 	snprintf(path, sizeof(path), "/sys%s/device/name", ev->devpath);
-	if (sysfs_read(path, name, sizeof(name)))
+	if (sysfs_read_file(path, name, sizeof(name)))
 		return -1;
 
 	/* Clean up name */
@@ -878,7 +853,7 @@ static int symlink_add_input(struct uevent *ev)
 
 	/* by-path: physical path (if available) */
 	snprintf(path, sizeof(path), "/sys%s/device/phys", ev->devpath);
-	if (!sysfs_read(path, phys, sizeof(phys))) {
+	if (!sysfs_read_file(path, phys, sizeof(phys))) {
 		for (p = phys; *p; p++) {
 			if (*p == ' ' || *p == '/')
 				*p = '_';

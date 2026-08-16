@@ -67,6 +67,7 @@
 
 #include "keventd.h"
 #include "rules.h"
+#include "sysfs.h"
 #include "udevdb.h"
 #include "cond.h"
 #include "pid.h"
@@ -81,9 +82,60 @@
 /* Used by settle and coldplug at startup */
 struct coldplug_gate {
 	unsigned long long last_seq;
-	struct timespec    last_change;
+	uint64_t           stamp;	/* kev_now_ms() of last change */
 	int                primed;
 };
+
+/*
+ * Read the kernel's uevent sequence counter.  Shared by the coldplug
+ * gate, settle mode, and the D-Bus queue state.
+ */
+static int read_uevent_seqnum(unsigned long long *out)
+{
+	FILE *fp;
+	int rc;
+
+	fp = fopen("/sys/kernel/uevent_seqnum", "r");
+	if (!fp)
+		return -1;
+
+	rc = fscanf(fp, "%llu", out) == 1 ? 0 : -1;
+	fclose(fp);
+
+	return rc;
+}
+
+uint64_t kev_now_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/*
+ * Track the kernel seqnum: returns 1 once it has been unchanged for
+ * stable_ms, 0 while still moving (or before the first sample).
+ */
+static int seqnum_stable(struct coldplug_gate *cg, int stable_ms)
+{
+	unsigned long long cur = 0;
+	uint64_t now;
+
+	if (read_uevent_seqnum(&cur))
+		return 0;
+
+	now = kev_now_ms();
+
+	if (!cg->primed || cur != cg->last_seq) {
+		cg->last_seq = cur;
+		cg->stamp    = now;
+		cg->primed   = 1;
+		return 0;
+	}
+
+	return now - cg->stamp >= (uint64_t)stable_ms;
+}
 
 static int num_ac_online;
 static int num_ac;
@@ -181,39 +233,6 @@ static void rebc_event(char *buf, size_t len)
 		logit(LOG_DEBUG, "rebroadcast failed: %s", strerror(errno));
 }
 
-static void sys_cond(const char *cond, int set)
-{
-	char oneshot[256];
-
-	snprintf(oneshot, sizeof(oneshot), "%s/%s", _PATH_CONDSYS, cond);
-	if (set) {
-		if (symlink(_PATH_RECONF, oneshot) && errno != EEXIST)
-			warn("failed asserting sys/%s", cond);
-	} else {
-		if (erase(oneshot) && errno != ENOENT)
-			warn("failed asserting sys/%s", cond);
-	}
-}
-
-static int fgetline(const char *path, char *buf, size_t len)
-{
-	FILE *fp;
-
-	fp = fopen(path, "r");
-	if (!fp)
-		return -1;
-
-	if (!fgets(buf, len, fp)) {
-		fclose(fp);
-		return -1;
-	}
-
-	chomp(buf);
-	fclose(fp);
-
-	return 0;
-}
-
 static int check_online(const char *online)
 {
 	int val;
@@ -270,13 +289,13 @@ static void power_supply_change(const struct uevent *ev, char *buf, size_t len)
 		} else if (!strncmp(line, "POWER_SUPPLY_ONLINE=", 20) && ac) {
 			if (check_online(&line[20])) {
 				if (!num_ac_online)
-					sys_cond("pwr/ac", 1);
+					cond_emit(COND_SYS, "pwr/ac", 1);
 				num_ac_online++;
 			} else {
 				if (num_ac_online > 0)
 					num_ac_online--;
 				if (!num_ac_online)
-					sys_cond("pwr/ac", 0);
+					cond_emit(COND_SYS, "pwr/ac", 0);
 			}
 		}
 
@@ -429,20 +448,8 @@ static void handle_uevent(char *buf, size_t len)
 static void init_power_supply(void)
 {
 	struct dirent **d = NULL;
-	char *cond_dirs[] = {
-		_PATH_CONDSYS,
-		_PATH_CONDSYS "/pwr",
-	};
 	char path[384];
 	int i, n;
-
-	for (i = 0; i < (int)NELEMS(cond_dirs); i++) {
-		if (mkpath(cond_dirs[i], 0755) && errno != EEXIST) {
-			warn("Failed creating %s condition directory, %s", COND_SYS,
-			    cond_dirs[i]);
-			return;
-		}
-	}
 
 	n = scandir(_PATH_SYSFS_PWR, &d, NULL, alphasort);
 	for (i = 0; i < n; i++) {
@@ -450,11 +457,11 @@ static void init_power_supply(void)
 		char buf[10];
 
 		snprintf(path, sizeof(path), "%s/%s/type", _PATH_SYSFS_PWR, nm);
-		if (!fgetline(path, buf, sizeof(buf)) && is_ac(buf)) {
+		if (!sysfs_read_file(path, buf, sizeof(buf)) && is_ac(buf)) {
 			num_ac++;
 
 			snprintf(path, sizeof(path), "%s/%s/online", _PATH_SYSFS_PWR, nm);
-			if (!fgetline(path, buf, sizeof(buf))) {
+			if (!sysfs_read_file(path, buf, sizeof(buf))) {
 				if (check_online(buf))
 					num_ac_online++;
 			}
@@ -467,17 +474,7 @@ static void init_power_supply(void)
 
 	/* if any power_supply is online, or none can be found */
 	if (num_ac == 0 || num_ac_online > 0)
-		sys_cond("pwr/ac", 1);
-}
-
-static void init_dev_condition_dir(void)
-{
-	char dir[256];
-
-	/* Create /run/finit/cond/dev/ directory for device conditions */
-	snprintf(dir, sizeof(dir), "%s", _PATH_CONDDEV);
-	if (mkpath(dir, 0755) && errno != EEXIST)
-		warn("Failed creating dev condition directory %s", dir);
+		cond_emit(COND_SYS, "pwr/ac", 1);
 }
 
 static void disable_uevent_helper(void)
@@ -577,31 +574,12 @@ static void uevent_cb(uev_t *w, void *arg, int events)
  * means "/dev is populated, persistent symlinks are live" rather
  * than just "listening on netlink".
  */
-/*
- * Read the kernel's uevent sequence counter.  Shared by the coldplug
- * gate, settle mode, and the D-Bus queue state.
- */
-static int read_uevent_seqnum(unsigned long long *out)
-{
-	FILE *fp;
-	int rc;
-
-	fp = fopen("/sys/kernel/uevent_seqnum", "r");
-	if (!fp)
-		return -1;
-
-	rc = fscanf(fp, "%llu", out) == 1 ? 0 : -1;
-	fclose(fp);
-
-	return rc;
-}
-
 unsigned long long kev_seq_processed(void)
 {
 	return seq_processed;
 }
 
-void kev_seq_baseline(void)
+static void kev_seq_baseline(void)
 {
 	unsigned long long seq;
 
@@ -628,33 +606,10 @@ int kev_rules_reload(void)
 static void coldplug_pidfile_cb(uev_t *w, void *arg, int events)
 {
 	struct coldplug_gate *cg = arg;
-	unsigned long long cur = 0;
-	struct timespec now;
-	long dt_ms;
 
 	(void)events;
 
-	if (read_uevent_seqnum(&cur))
-		return;
-
-	clock_gettime(CLOCK_MONOTONIC, &now);
-
-	if (!cg->primed) {
-		cg->last_seq = cur;
-		cg->last_change = now;
-		cg->primed = 1;
-		return;
-	}
-
-	if (cur != cg->last_seq) {
-		cg->last_seq = cur;
-		cg->last_change = now;
-		return;
-	}
-
-	dt_ms = (now.tv_sec -  cg->last_change.tv_sec)  * 1000 +
-		(now.tv_nsec - cg->last_change.tv_nsec) / 1000000;
-	if (dt_ms < 200)
+	if (!seqnum_stable(cg, 200))
 		return;
 
 	pidfile(NULL);
@@ -672,32 +627,20 @@ static void coldplug_pidfile_cb(uev_t *w, void *arg, int events)
  */
 static int cmd_settle(int timeout_s, int stable_ms)
 {
-	unsigned long long last_seq = 0, cur_seq = 0;
-	struct timespec start, last_change, now;
-
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	last_change = start;
+	struct coldplug_gate cg = { 0 };
+	uint64_t deadline = kev_now_ms() + (uint64_t)timeout_s * 1000;
 
 	while (1) {
-		if (read_uevent_seqnum(&cur_seq)) {
+		if (seqnum_stable(&cg, stable_ms))
+			return 0;
+
+		if (!cg.primed) {
 			fprintf(stderr, "keventd: cannot read uevent_seqnum: %s\n",
 				strerror(errno));
 			return 1;
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
-
-		if (cur_seq != last_seq) {
-			last_seq = cur_seq;
-			last_change = now;
-		} else {
-			long dt_ms = (now.tv_sec - last_change.tv_sec) * 1000 +
-				     (now.tv_nsec - last_change.tv_nsec) / 1000000;
-			if (dt_ms >= stable_ms)
-				return 0;
-		}
-
-		if (now.tv_sec - start.tv_sec >= timeout_s)
+		if (kev_now_ms() >= deadline)
 			return 1;
 
 		usleep(50000);
@@ -828,7 +771,6 @@ int main(int argc, char *argv[])
 
 	/* Initialize condition directories */
 	init_power_supply();
-	init_dev_condition_dir();
 
 	/* Disable legacy kernel uevent helper; we own events via netlink.
 	 * Skip in passive mode -- the hotplug daemon handles this. */

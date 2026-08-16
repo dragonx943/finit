@@ -41,7 +41,6 @@
 #include "sysfs.h"
 
 /* Forward declarations from keventd.c and uevent.c */
-void logit(int prio, const char *fmt, ...);
 int  modprobe_load(const char *modalias);
 
 /* Forward declarations — defined in the usb_id section below */

@@ -50,8 +50,6 @@
 #include "udevdb.h"
 #include "util.h"
 
-void logit(int prio, const char *fmt, ...);
-
 #define DEVBUS_DIR         "/run/keventd"
 #define DEVBUS_SOCKET      DEVBUS_DIR "/bus"
 #define DEVBUS_PATH_OBJECT "/org/finit/device"
@@ -85,14 +83,6 @@ struct settle {
 static struct settle settles[DEVBUS_MAX_SETTLES];
 static uev_t         settle_timer;
 static int           settle_armed;
-
-static uint64_t now_ms(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 
 /*
  * Same policy as /run/finit/bus: root and members of the --with-group
@@ -226,7 +216,7 @@ static void settle_sweep(uev_t *w, void *arg, int events);
  */
 static void settle_arm(uint64_t deadline)
 {
-	uint64_t now = now_ms();
+	uint64_t now = kev_now_ms();
 	int ms = deadline > now ? (int)(deadline - now) : 1;
 
 	if (!settle_armed) {
@@ -247,7 +237,7 @@ static void settle_arm(uint64_t deadline)
 static void settle_sweep(uev_t *w, void *arg, int events)
 {
 	uint64_t next = 0;
-	uint64_t now = now_ms();
+	uint64_t now = kev_now_ms();
 	int empty = kev_queue_empty();
 	int i;
 
@@ -305,7 +295,7 @@ static int device1_settle(link_call_t *call, void *u)
 				break;
 
 			settles[i].conn     = link_call_connection(call);
-			settles[i].deadline = now_ms() + (uint64_t)timeout * 1000;
+			settles[i].deadline = kev_now_ms() + (uint64_t)timeout * 1000;
 			settle_arm(settles[i].deadline);
 			return 0;
 		}
