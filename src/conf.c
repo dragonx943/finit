@@ -701,9 +701,9 @@ char *conf_escape(const char *str, char *buf, size_t len)
 }
 
 /*
- * Called by plugins and similar that dynamically generate system
- * services.  @body holds the block contents, one indented line per
- * setting.
+ * Generates /run/finit/system/<file> for Finit's built-in services,
+ * which must probe the running system before registering.  @fmt holds
+ * the block contents, one indented line per setting.
  */
 void conf_save_service(int type, const char *name, char *file, const char *fmt, ...)
 {
@@ -2307,28 +2307,23 @@ int conf_reload(void)
 	}
 
 	/*
-	 * Next, read all *.conf in /lib/finit/system and /etc/finit.d/
-	 * The system files were previously created at runtime by plugins
-	 * but are now regular files that can be overridden by files in
-	 * /etc/finit.d -- similar to how tmfiles.d(5) work.  E.g., add
-	 * an override .conf, or an ignore by symlinking to /dev/null
+	 * Next, read all *.conf in /run/finit/system, /lib/finit/system,
+	 * and /etc/finit.d/.  The runtime directory holds files Finit
+	 * generates for its built-in services (keventd, watchdogd,
+	 * runparts), read first so later files can reference them in
+	 * if: statements.  A same-named file in a later directory
+	 * overrides an earlier one, similar to how tmpfiles.d(5) work,
+	 * so /etc/finit.d, always read last, is how users override any
+	 * built-in or bundled configuration.
 	 *
-	 * The .conf files (and run/task/service stanzas) are parsed and
-	 * started in order.  Each directory is sorted alphanumerically
-	 * and then the result is appended to the overall order:
-	 *
-	 *     /lib/finit/system/10-hotplug.conf
-	 *     /lib/finit/system/90-testserv.conf
-	 *     /run/finit/system/dbus.conf
-	 *     /run/finit/system/tty.conf
-	 *     /etc/finit.d/10-abc.conf
-	 *     /etc/finit.d/20-abc.conf
-	 *     /etc/finit.d/enabled/1-aaa.conf
-	 *     /etc/finit.d/enabled/1-abc.conf
-	 *     /etc/finit.d/enabled/2-aaa.conf
+	 * The .conf files (and their run/task/service stanzas) are
+	 * parsed and started in order.  Each directory is sorted
+	 * alphanumerically before being appended to the overall order,
+	 * recorded in /run/finit/conf.order at bootstrap.  See
+	 * doc/config/files.md for an example.
 	 */
-	glob_append(&gl, 0, "%s/*.conf", FINIT_SYSPATH_);
-	glob_append(&gl, 1, "%s/*.conf", FINIT_RUNPATH_);
+	glob_append(&gl, 0, "%s/*.conf", FINIT_RUNPATH_);
+	glob_append(&gl, 1, "%s/*.conf", FINIT_SYSPATH_);
 	glob_append(&gl, 1, "%s/*.conf", finit_rcsd);
 	glob_append(&gl, 1, "%s/enabled/*.conf", finit_rcsd);
 

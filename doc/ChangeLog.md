@@ -8,6 +8,12 @@ All relevant changes are documented in this file.
 
 ### Changes
 
+- The generated `/run/finit/system/*.conf` files for built-in services
+  (keventd, watchdogd, runparts) are now read before
+  `/lib/finit/system/*.conf` instead of after.  Built-ins can now be
+  referenced in `if:` statements from system .conf files and overridden
+  by name from both `/lib/finit/system` and `/etc/finit.d`, the latter
+  is still always read last
 - The `dbus.so` plugin, which starts an external `dbus-daemon`, is now
   enabled by default.  It does nothing on systems without a
   `dbus-daemon` installed, and `--disable-dbus-plugin` opts out.  The
