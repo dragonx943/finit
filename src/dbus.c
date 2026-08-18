@@ -314,46 +314,24 @@ static int manager_get_service(link_call_t *call, void *userdata)
 	return 0;
 }
 
-/* Service-control helpers used by Start/Stop/Restart/Reload.  These
- * mirror the static helpers in api.c — kept private here so api.c
- * stays untouched in this increment. */
+/* svc_parse_jobstr-style adapters over the shared service helpers */
 
 static int dbus_apply_stop(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-	if (!svc)
-		return 1;
-	service_timeout_cancel(svc);
-	svc_stop(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-	return 0;
+	return service_stop_now(svc);
 }
 
 static int dbus_apply_start(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-	if (!svc)
-		return 1;
-	service_timeout_cancel(svc);
-	svc_start(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-	return 0;
+	return service_start_now(svc);
 }
 
 static int dbus_apply_restart(svc_t *svc, void *user_data)
 {
-	if (!svc)
-		return 1;
-	if (!svc_is_running(svc))
-		return dbus_apply_start(svc, user_data);
-	service_timeout_cancel(svc);
-	service_stop(svc);
-	service_step(svc);
-	return 0;
+	(void)user_data;
+	return service_restart_now(svc);
 }
 
 struct dispatch_ctx {
@@ -454,9 +432,7 @@ static int manager_set_runlevel(link_call_t *call, void *userdata)
 			"org.freedesktop.DBus.Error.InvalidArgs",
 			"runlevel must be 0-9 (excluding internal levels)");
 
-	if (lvl == 0) halt = SHUT_OFF;
-	if (lvl == 6) halt = SHUT_REBOOT;
-	sm_runlevel((int)lvl);
+	sm_request_runlevel((int)lvl);
 
 	(void)link_call_reply(call);
 	return 0;
@@ -464,11 +440,18 @@ static int manager_set_runlevel(link_call_t *call, void *userdata)
 
 static int dbus_shutdown(link_call_t *call, shutop_t target, int level)
 {
+	uint32_t timeout;
+
+	if (link_call_read_u32(call, &timeout) < 0)
+		return link_call_reply_error(call,
+			"org.freedesktop.DBus.Error.InvalidArgs",
+			"expected (u)");
 	if (IS_RESERVED_RUNLEVEL(runlevel))
 		return link_call_reply_error(call,
 			"org.finit.Error.WrongRunlevel",
 			"Already in shutdown");
 	halt = target;
+	shutdown_bypass((int)timeout);
 	sm_runlevel(level);
 	(void)link_call_reply(call);
 	return 0;
@@ -490,11 +473,9 @@ static int signal_one(svc_t *svc, void *udata)
 {
 	int signo = *(int *)udata;
 
-	/* Silently skip stopped services -- a multi-match ident
-	 * (e.g. "sshd:*") should not fail the whole call just because
-	 * one of the matches happens to be in a halted state. */
+	/* Signalling a stopped service is an error, like the legacy API */
 	if (!svc_is_running(svc))
-		return 0;
+		return 1;
 	return !!kill(svc->pid, signo);
 }
 
@@ -535,6 +516,10 @@ static int manager_signal(link_call_t *call, void *u)
 static int manager_suspend(link_call_t *call, void *u)
 {
 	(void)u;
+	if (IS_RESERVED_RUNLEVEL(runlevel))
+		return link_call_reply_error(call,
+			"org.finit.Error.WrongRunlevel",
+			"Unsupported command in runlevel S and 6/0");
 	sync();
 	if (suspend() < 0) {
 		const char *msg = (errno == EINVAL)
@@ -623,11 +608,11 @@ static const link_method_t manager_methods[] = {
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_reload },
 	{ .name = "SetRunlevel",  .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_set_runlevel },
-	{ .name = "Reboot",       .in_sig = "",  .out_sig = "",
+	{ .name = "Reboot",       .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_reboot },
-	{ .name = "Poweroff",     .in_sig = "",  .out_sig = "",
+	{ .name = "Poweroff",     .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_poweroff },
-	{ .name = "Halt",         .in_sig = "",  .out_sig = "",
+	{ .name = "Halt",         .in_sig = "u", .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_halt },
 	{ .name = "Suspend",      .in_sig = "",  .out_sig = "",
 	  .flags = LINK_METHOD_PRIVILEGED, .handler = manager_suspend },
@@ -638,10 +623,18 @@ static const link_method_t manager_methods[] = {
 	{ NULL, NULL, NULL, 0, NULL }
 };
 
+static const link_signal_t manager_signals[] = {
+	{ .name = "ServiceStateChanged", .sig = "sss" },
+	{ .name = "RunlevelChanged",     .sig = "ss"  },
+	{ .name = "ConfigReloaded",      .sig = ""    },
+	{ NULL, NULL }
+};
+
 static const link_vtable_t manager_vtable = {
 	.interface  = "org.finit.Manager1",
 	.methods    = manager_methods,
 	.properties = manager_properties,
+	.signals    = manager_signals,
 };
 
 /* ---------- org.finit.Service1 (one object per service) ----------
@@ -665,7 +658,11 @@ static int service_action_method(link_call_t *call, void *userdata,
 			"org.finit.Error.NoSuchService",
 			"Service object no longer valid");
 
-	action(svc, NULL);
+	if (action(svc, NULL))
+		return link_call_reply_error(call,
+			"org.finit.Error.Failed",
+			"failed on service");
+
 	(void)link_call_reply(call);
 	return 0;
 }
@@ -674,18 +671,15 @@ static int service1_start  (link_call_t *c, void *u) { return service_action_met
 static int service1_stop   (link_call_t *c, void *u) { return service_action_method(c, u, dbus_apply_stop);    }
 static int service1_restart(link_call_t *c, void *u) { return service_action_method(c, u, dbus_apply_restart); }
 
-static int service1_reload(link_call_t *call, void *userdata)
+static int dbus_apply_reload(svc_t *svc, void *user_data)
 {
-	svc_t *svc = userdata;
+	(void)user_data;
+	return service_reload(svc);
+}
 
-	if (!svc)
-		return link_call_reply_error(call,
-			"org.finit.Error.NoSuchService",
-			"Service object no longer valid");
-
-	service_reload(svc);
-	(void)link_call_reply(call);
-	return 0;
+static int service1_reload(link_call_t *c, void *u)
+{
+	return service_action_method(c, u, dbus_apply_reload);
 }
 
 static const link_method_t service_methods[] = {
@@ -1049,6 +1043,18 @@ void dbus_notify_runlevel_change(int old_level, int new_level)
 			 "RunlevelChanged", "ss", body, (size_t)blen);
 }
 
+/*
+ * Reconfiguration complete: all conditions have been re-asserted by
+ * their in-Finit owners.  External providers whose conditions are
+ * generation files, rather than the oneshot symlinks keventd uses,
+ * subscribe to this to re-assert theirs.
+ */
+void dbus_notify_reload(void)
+{
+	dbus_emit_signal("/org/finit/manager", "org.finit.Manager1",
+			 "ConfigReloaded", "", NULL, 0);
+}
+
 /* ---------- org.finit.Cond1 ---------- */
 
 #define COND_PATH_OBJECT "/org/finit/cond"
@@ -1148,7 +1154,7 @@ static int cond1_set_or_clear(link_call_t *call, int do_set)
 			"org.freedesktop.DBus.Error.InvalidArgs",
 			"Set/Clear is restricted to usr/* conditions");
 
-	if (do_set)
+	if (do_set) {
 		/* cond_set_oneshot, not cond_set: a user-asserted condition
 		 * is a symlink to _PATH_RECONF, so it tracks the reconf
 		 * generation automatically and stays "on" across reloads
@@ -1157,8 +1163,17 @@ static int cond1_set_or_clear(link_call_t *call, int do_set)
 		 * semantics for user conditions, and what initctl cond set
 		 * has done forever via the filesystem path. */
 		cond_set_oneshot(full);
-	else
+		if (cond_get(full) != COND_ON)
+			return link_call_reply_error(call,
+				"org.finit.Error.Failed",
+				"failed asserting condition");
+	} else {
 		cond_clear(full);
+		if (cond_get(full) != COND_OFF)
+			return link_call_reply_error(call,
+				"org.finit.Error.Failed",
+				"failed clearing condition");
+	}
 
 	(void)link_call_reply(call);
 	return 0;
@@ -1256,9 +1271,15 @@ static const link_method_t cond_methods[] = {
 	{ NULL, NULL, NULL, 0, NULL }
 };
 
+static const link_signal_t cond_signals[] = {
+	{ .name = "ConditionChanged", .sig = "ss" },
+	{ NULL, NULL }
+};
+
 static const link_vtable_t cond_vtable = {
 	.interface = COND_INTERFACE,
 	.methods   = cond_methods,
+	.signals   = cond_signals,
 };
 
 /* ---------- signal emission: ConditionChanged ---------- */

@@ -1067,13 +1067,26 @@ static int do_cmd(int cmd)
 #ifdef HAVE_DBUS
 static int do_reboot_dbus(const char *method)
 {
-	int rc = try_dbus_manager(method, "", NULL);
+	link_client_t *c;
+	int rc;
 
-	if (rc == 0) {
+	c = link_client_open(FINIT_BUS_SOCKET);
+	if (!c)
+		return -1;	/* fall back to legacy transport */
+
+	/* Timeout in seconds arms the emergency shutdown bypass, 0 = none */
+	rc = link_client_call_v(c, "/org/finit/manager",
+				"org.finit.Manager1", method,
+				"u", (uint32_t)timeout);
+	if (rc == LINK_CALL_ERROR)
+		map_dbus_err(c, method, NULL);	/* exits */
+	link_client_close(c);
+
+	if (rc == LINK_CALL_OK) {
 		sleep(5);	/* match legacy: wait for finit to shut down */
 		return 0;
 	}
-	return rc;	/* 1 = error, -1 = fall back */
+	return -1;	/* fall back */
 }
 #endif
 

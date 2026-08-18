@@ -94,3 +94,25 @@ case "$(cat /tmp/dbus-sig.out)" in
     *)
         fail "Unexpected signal output: $(cat /tmp/dbus-sig.out)" ;;
 esac
+
+# ---------- name:id identities and _HH path encoding ----------
+
+say "Manager1.GetService(dhcp-client:eth1) hex-escapes the object path"
+cat >> "$SYSROOT$FINIT_CONF" <<CONF
+service dhcp-client:eth1 {
+    manual  = true
+    command = "serv -np"
+}
+CONF
+run "initctl reload"
+epath=$(texec "$CLIENT" get-service "$BUS" "dhcp-client:eth1")
+assert "Encoded path (got: $epath)" "$epath" = "/org/finit/service/dhcp_2dclient_3aeth1"
+
+say "The encoded service object introspects and answers Properties.Get"
+exml=$(texec "$CLIENT" introspect "$BUS" "$epath")
+case "$exml" in
+    *'org.finit.Service1'*) assert "Service1 on encoded path" 0 -eq 0 ;;
+    *) fail "Service1 missing on $epath" ;;
+esac
+eident=$(texec "$CLIENT" getprop "$BUS" "$epath" org.finit.Service1 Identity)
+assert "Identity round-trips (got: $eident)" "$eident" = "dhcp-client:eth1"

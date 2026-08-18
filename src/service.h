@@ -60,6 +60,9 @@ void      service_forked         (svc_t *svc);
 void      service_ready          (svc_t *svc, int ready);
 
 int       service_stop           (svc_t *svc);
+int       service_start_now      (svc_t *svc);
+int       service_stop_now       (svc_t *svc);
+int       service_restart_now    (svc_t *svc);
 int       service_reload         (svc_t *svc);
 int       service_step           (svc_t *svc);
 void      service_step_all       (int types);

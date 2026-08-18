@@ -261,6 +261,7 @@ const char *link_call_path     (const link_call_t *c) { return c ? c->incoming.p
 const char *link_call_interface(const link_call_t *c) { return c ? c->incoming.interface : NULL; }
 const char *link_call_member   (const link_call_t *c) { return c ? c->incoming.member    : NULL; }
 uid_t       link_call_uid      (const link_call_t *c) { return c ? c->uid               : LINK_UID_UNKNOWN; }
+link_connection_t *link_call_connection(const link_call_t *c) { return c ? c->conn : NULL; }
 
 link_writer_t *link_call_reply(link_call_t *call)
 {
@@ -287,6 +288,7 @@ int link_call_reply_error(link_call_t *call, const char *name, const char *messa
 int link_call_read_byte  (link_call_t *c, uint8_t *o)        { return __r_byte  (&c->read_cursor, o); }
 int link_call_read_bool  (link_call_t *c, int *o)            { return __r_bool  (&c->read_cursor, o); }
 int link_call_read_u32   (link_call_t *c, uint32_t *o)       { return __r_u32   (&c->read_cursor, o); }
+int link_call_read_u64   (link_call_t *c, uint64_t *o)       { return __r_u64   (&c->read_cursor, o); }
 int link_call_read_string(link_call_t *c, const char **o)    { return __r_string(&c->read_cursor, o); }
 int link_call_read_path  (link_call_t *c, const char **o)    { return __r_path  (&c->read_cursor, o); }
 
@@ -298,6 +300,7 @@ ssize_t link_writer_finish(link_writer_t *w)                           { return 
 void link_w_byte    (link_writer_t *w, uint8_t v)        { __w_byte(w, v); }
 void link_w_bool    (link_writer_t *w, int v)            { __w_bool(w, v); }
 void link_w_u32     (link_writer_t *w, uint32_t v)       { __w_u32(w, v);  }
+void link_w_u64     (link_writer_t *w, uint64_t v)       { __w_u64(w, v);  }
 void link_w_string  (link_writer_t *w, const char *s)    { __w_string(w, s); }
 void link_w_path    (link_writer_t *w, const char *s)    { __w_path(w, s);   }
 void link_w_variant_string(link_writer_t *w, const char *s) { __w_variant_string(w, s); }
@@ -312,6 +315,7 @@ void link_reader_init(link_reader_t *r, const uint8_t *body, size_t len) { __r_i
 int  link_r_byte  (link_reader_t *r, uint8_t  *o)     { return __r_byte  (r, o); }
 int  link_r_bool  (link_reader_t *r, int      *o)     { return __r_bool  (r, o); }
 int  link_r_u32   (link_reader_t *r, uint32_t *o)     { return __r_u32   (r, o); }
+int  link_r_u64   (link_reader_t *r, uint64_t *o)     { return __r_u64   (r, o); }
 int  link_r_string(link_reader_t *r, const char **o)  { return __r_string(r, o); }
 int  link_r_path  (link_reader_t *r, const char **o)  { return __r_path  (r, o); }
 int  link_r_variant_begin (link_reader_t *r, char *type)     { return __r_variant_begin(r, type); }
@@ -390,6 +394,7 @@ static struct link_parked *park(link_connection_t *conn, const uint8_t *frame,
 	bus->parked[i].tok   = ++bus->next_tok;
 	bus->parked[i].conn  = conn;
 	bus->parked[i].stamp = __now_ms();
+	bus->parked[i].uid   = (uid_t)-1;
 	bus->parked[i].len   = len;
 	memcpy(bus->parked[i].buf, frame, len);
 	*tok = bus->parked[i].tok;
@@ -474,13 +479,20 @@ void __dispatch_forget_conn(link_connection_t *conn)
 
 static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 			 const uint8_t *frame, size_t framelen,
-			 const uid_t *known_uid);
+			 const uid_t *known_uid, int resumed);
 
-void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid)
+/*
+ * Shared resume: copy the parked frame out, free the slot, re-enter
+ * dispatch.  `uid` NULL means "use what the slot recorded" (a
+ * handler-parked call); non-NULL is a resolver's answer.
+ */
+static void resume_parked(link_connection_t *conn, link_authz_t tok,
+			  const uid_t *uid, int resumed)
 {
 	uint8_t             buf[LINK_PARKED_MSG_MAX];
 	struct link_parked *p = NULL;
 	struct link_msg     msg;
+	uid_t               slot_uid;
 	size_t              len;
 	int                 i;
 
@@ -498,15 +510,58 @@ void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid)
 
 	/* Copy the message out and free the slot before dispatching:
 	 * the handler may park a call of its own. */
-	len = p->len;
+	len      = p->len;
+	slot_uid = p->uid;
 	memcpy(buf, p->buf, len);
 	unpark(p);
 
 	if (__msg_parse(buf, len, &msg) <= 0)
 		return;
 
-	__dbg("resumed %s, caller uid %d", msg.member ? msg.member : "call", (int)uid);
-	(void)dispatch_call(conn, &msg, NULL, 0, &uid);
+	if (!uid)
+		uid = &slot_uid;
+
+	__dbg("resumed %s, caller uid %d", msg.member ? msg.member : "call", (int)*uid);
+	(void)dispatch_call(conn, &msg, NULL, 0, uid, resumed);
+}
+
+void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid)
+{
+	resume_parked(conn, tok, &uid, 0);
+}
+
+/*
+ * Defer the reply: hold the request and re-run the handler later via
+ * link_call_resume(), where link_call_resumed() reads true.  A resumed
+ * call cannot park again -- the raw frame is gone -- so the handler
+ * must answer on the second run.  link_connection_expire() is the
+ * backstop for a resume that never comes.
+ */
+int link_call_park(link_call_t *call, link_authz_t *tok)
+{
+	struct link_parked *p;
+
+	if (!call || !tok || call->resumed)
+		return -1;
+
+	p = park(call->conn, call->frame, call->framelen, tok);
+	if (!p)
+		return -1;
+
+	p->uid = call->uid;
+	call->parked = 1;
+
+	return 0;
+}
+
+void link_call_resume(link_connection_t *conn, link_authz_t tok)
+{
+	resume_parked(conn, tok, NULL, 1);
+}
+
+int link_call_resumed(const link_call_t *call)
+{
+	return call ? call->resumed : 0;
 }
 
 int __dispatch_message(link_connection_t *conn, const struct link_msg *m, size_t framelen)
@@ -521,7 +576,7 @@ int __dispatch_message(link_connection_t *conn, const struct link_msg *m, size_t
 		return 0;
 	}
 
-	return dispatch_call(conn, m, conn->rxbuf, framelen, NULL);
+	return dispatch_call(conn, m, conn->rxbuf, framelen, NULL, 0);
 }
 
 /* Who may invoke a privileged method.  Without an authorizer, only
@@ -579,7 +634,7 @@ static int resolve_caller(link_connection_t *conn, const struct link_msg *m,
 
 static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 			 const uint8_t *frame, size_t framelen,
-			 const uid_t *known_uid)
+			 const uid_t *known_uid, int resumed)
 {
 	struct link_object       *o;
 	struct link_vtable_entry *e = NULL;
@@ -673,8 +728,8 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 		 * resolved over a broker carries only its uid, so the
 		 * authorizer sees no groups and falls back to root-only. */
 		if (!caller_may(conn->server, call_uid,
-				known_uid ? NULL : conn->peer_groups,
-				known_uid ? 0    : conn->peer_ngroups)) {
+				conn->broker ? NULL : conn->peer_groups,
+				conn->broker ? 0    : conn->peer_ngroups)) {
 			__dbg("denied %s, caller uid %d is not privileged",
 			      m->member, (int)call_uid);
 			return __send_error(conn, m,
@@ -687,9 +742,17 @@ static int dispatch_call(link_connection_t *conn, const struct link_msg *m,
 	call.conn     = conn;
 	call.uid      = call_uid;
 	call.incoming = *m;
+	call.frame    = frame;
+	call.framelen = framelen;
+	call.resumed  = resumed;
 	__r_init(&call.read_cursor, m->body, m->body_avail);
 
 	rc = meth->handler(&call, e->userdata);
+
+	/* The handler parked the call: no reply yet, it is resumed via
+	 * link_call_resume() or expired by link_connection_expire(). */
+	if (call.parked)
+		return 0;
 
 	/* Every path returns the status of whatever it put on the wire,
 	 * so a failed send propagates out and the read loop drops the

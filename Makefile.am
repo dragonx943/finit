@@ -11,6 +11,11 @@ if DBUS
 SUBDIRS           += libink dbus-1
 endif
 SUBDIRS           += src system tmpfiles.d
+
+if KEVENTD
+SUBDIRS           += keventd
+endif
+
 dist_doc_DATA      = README.md LICENSE contrib/finit.conf
 
 if CONTRIB

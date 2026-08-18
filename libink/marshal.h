@@ -22,6 +22,7 @@ ssize_t __w_finish(struct link_writer *w);
 void __w_byte    (struct link_writer *w, uint8_t v);
 void __w_bool    (struct link_writer *w, int v);
 void __w_u32     (struct link_writer *w, uint32_t v);
+void __w_u64     (struct link_writer *w, uint64_t v);
 void __w_string  (struct link_writer *w, const char *s);  /* "s" */
 void __w_path    (struct link_writer *w, const char *s);  /* "o" */
 void __w_sig     (struct link_writer *w, const char *s);  /* "g" */
@@ -44,6 +45,7 @@ void __r_init  (struct link_reader *r, const uint8_t *body, size_t len);
 int  __r_byte  (struct link_reader *r, uint8_t *out);
 int  __r_bool  (struct link_reader *r, int      *out);
 int  __r_u32   (struct link_reader *r, uint32_t *out);
+int  __r_u64   (struct link_reader *r, uint64_t *out);
 int  __r_string(struct link_reader *r, const char **out);  /* "s" */
 int  __r_path  (struct link_reader *r, const char **out);  /* "o" */
 int  __r_variant_begin (struct link_reader *r, char *type);       /* sig header, cursor at value */

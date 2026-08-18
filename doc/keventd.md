@@ -1,14 +1,427 @@
-keventd
-=======
+Bundled Device Manager
+======================
 
-The kernel event daemon bundled with Finit is a simple uevent monitor
-for `/sys/class/power_supply`.  It provides the `sys/pwr/ac` condition,
-which can be useful to prevent power hungry services like anacron to run
-when a laptop is only running on battery, for instance.
+The kernel event daemon `keventd` is a built-in device manager bundled
+with Finit.  It replaces the need for external device managers like
+mdev, mdevd, or udevd on systems where a lighter-weight solution is
+preferred, particularly on embedded systems.
 
-Since keventd is not an integral part of Finit yet it is not enabled by
-default.  Enable it using `./configure --with-keventd`.  The bundled
-`contrib/` build scripts for Debian, Alpine, and Void have this enabled.
+It is enabled by default since Finit v5, and needs libblkid from
+util-linux (the `libblkid-dev` package, or whatever your distribution
+calls it) to read the filesystem UUID and label behind the
+`/dev/disk/by-uuid/` and `/dev/disk/by-label/` symlinks.  To disable it
+and use an external device manager instead:
 
-This daemon is planned to be extended with monitoring of other uevents,
-patches and ideas are welcome in the issue tracker.
+    ./configure --without-keventd
+
+
+Features
+--------
+
+When started, keventd listens on a `NETLINK_KOBJECT_UEVENT` socket for
+kernel events and handles:
+
+- **Device node creation**: creates and removes `/dev` nodes with
+  correct permissions on device add/remove events
+- **udev rules**: matches events against rules read from
+  `/lib/udev/rules.d/`, `/run/udev/rules.d/`, and `/etc/udev/rules.d/`,
+  with a curated ruleset derived from eudev installed by default
+- **Persistent symlinks**: creates `by-id` and `by-path` symlinks under
+  `/dev/disk/`, `/dev/input/`, and elsewhere, for stable device naming
+- **Firmware loading**: responds to kernel firmware requests by searching
+  `/lib/firmware/` and writing firmware data to sysfs
+- **Module loading**: parses `MODALIAS` from uevents and spawns `modprobe`
+  to load the appropriate kernel module
+- **Coldplug**: with the `-c` flag, walks `/sys/devices` and triggers
+  add events for all devices present at boot
+- **Power supply monitoring**: tracks AC power status and provides the
+  `sys/pwr/ac` condition
+- **Device conditions**: sets `dev/*` conditions in the Finit condition
+  system when device nodes appear or disappear
+- **Netlink rebroadcast**: rebroadcasts processed uevents to netlink
+  group 0x4 for [libudev-zero][] consumers (enabled by default)
+- **D-Bus interface**: `org.finit.Device1` -- settle, trigger, device
+  info, rules reload, and queue state over its own bus socket
+
+
+Device Nodes
+------------
+
+On receiving an `add` event with `MAJOR`, `MINOR`, and `DEVNAME`
+fields, keventd creates the corresponding device node in `/dev` using
+`mknod()`.  Parent directories are created automatically (e.g.,
+`/dev/input/` for `/dev/input/event0`).
+
+On `remove` events, the device node and its associated symlinks and
+conditions are cleaned up.
+
+### Default Permissions
+
+keventd applies permissions based on built-in rules that match on
+device subsystem and name:
+
+| **Subsystem** | **Pattern**                                | **Mode** | **Owner:Group** |
+|---------------|--------------------------------------------|----------|-----------------|
+| block         | sd*, vd*, nvme*, mmcblk*, loop*, dm-*, md* | 0660     | root:disk       |
+| tty           | tty[0-9]*                                  | 0620     | root:tty        |
+| tty           | ttyS*, ttyUSB*, ttyACM*                    | 0660     | root:dialout    |
+| input         | event*, mouse*, mice                       | 0660     | root:root       |
+| sound         | *                                          | 0660     | root:audio      |
+| video4linux   | *                                          | 0660     | root:video      |
+| drm           | card*, render*                             | 0660     | root:video      |
+| (any)         | null, zero, full, random, urandom          | 0666     | root:root       |
+| (any)         | console                                    | 0600     | root:root       |
+| (default)     |                                            | 0660     | root:root       |
+
+
+Persistent Symlinks
+-------------------
+
+Symlinks come from two places.  A handful are built into keventd and are
+created for every device in the subsystem, whatever rules are loaded.
+
+For block devices, under `/dev/disk/`:
+
+- **by-id**: based on the device serial number and model, read from
+  sysfs attributes (`/sys/.../device/vendor`, `model`, `serial`)
+- **by-path**: based on the device topology path
+
+For input devices, under `/dev/input/`:
+
+- **by-id**: based on the device name from sysfs
+- **by-path**: based on the physical device path
+
+The rest come from `SYMLINK+=` in the udev rules, so what you get
+depends on the ruleset installed.  The curated rules Finit ships add,
+among others:
+
+| **Directory**  | **Links**                                              |
+|----------------|--------------------------------------------------------|
+| `/dev/disk/`   | `by-uuid`, `by-label`, `by-partuuid`, `by-partlabel`, `by-diskseq`, and further `by-id` and `by-path` names for NVMe, virtio, MMC, WWN, and FireWire |
+| `/dev/input/`  | longer `by-id` and `by-path` names than the built-in ones, down to the USB interface number |
+| `/dev/serial/` | `by-id`, `by-path`                                     |
+| `/dev/snd/`    | `by-id`, `by-path`                                     |
+| `/dev/v4l/`    | `by-id`, `by-path`                                     |
+| `/dev/tape/`   | `by-id`, `by-path`                                     |
+| `/dev/dri/`    | `by-path`                                              |
+
+They also set up a few fixed names: `/dev/rtc`, `/dev/cdrom`, and
+`/dev/virtio-ports/<name>`.
+
+The `by-uuid` and `by-label` links are why keventd needs libblkid.  The
+rules read the filesystem metadata off the device with
+`IMPORT{builtin}="blkid"`, and libblkid is what that builtin calls.
+
+Built-in and rule-provided symlinks alike are tracked internally and
+removed when the corresponding device is unplugged.
+
+
+Firmware Loading
+----------------
+
+When a kernel driver requests firmware (via `request_firmware()`), the
+kernel sends a uevent with a `FIRMWARE=` field.  keventd handles this
+by:
+
+1. Searching for the firmware file in order:
+   - `/lib/firmware/updates/<kernel-version>/<name>`
+   - `/lib/firmware/updates/<name>`
+   - `/lib/firmware/<kernel-version>/<name>`
+   - `/lib/firmware/<name>`
+2. Writing `1` to `/sys/<devpath>/loading` to signal start
+3. Copying the firmware data to `/sys/<devpath>/data`
+4. Writing `0` to `/sys/<devpath>/loading` on success (or `-1` on failure)
+
+This is particularly important early in boot when drivers for graphics
+cards, network adapters, and other hardware need firmware before they
+can operate.
+
+
+Module Loading
+--------------
+
+When a device add event includes a `MODALIAS` field, keventd spawns
+`modprobe -bq <modalias>` to load the matching kernel module.  Module
+loading is done asynchronously (keventd does not wait for modprobe to
+complete) to avoid blocking other event processing.
+
+
+Coldplug
+--------
+
+To handle devices that were present before keventd started, it supports
+a coldplug mode activated with the `-c` flag.  This walks the entire
+`/sys/devices` tree and writes `add` to each `uevent` file, causing the
+kernel to re-emit add events for all existing devices.
+
+This replaces the separate `coldplug` script previously used with mdev.
+
+When `-c` is used, keventd defers its pidfile (and the `pid/keventd`
+condition Finit asserts from it) until the coldplug event queue has
+been fully drained.  Services that depend on `<pid/keventd>` can
+therefore assume `/dev` is populated and persistent symlinks are live,
+without needing a separate `settle` step.
+
+
+Netlink Rebroadcast
+-------------------
+
+The Linux kernel sends uevents to netlink multicast group 1 (bit 0) of
+`NETLINK_KOBJECT_UEVENT`.  Only the device manager listens on this raw
+kernel group.  Userspace consumers — applications using libudev —
+expect to receive processed events on a separate netlink group.
+
+systemd/udevd established the convention of rebroadcasting processed
+events to a separate group, and [libudev-zero][], a daemonless drop-in
+replacement for libudev, listens on group `0x4` for these events.
+Without a device manager rebroadcasting, graphical applications,
+Wayland/X11 compositors, libinput, and anything else using libudev to
+monitor device hotplug will never see any events.
+
+keventd rebroadcasts by default to netlink group 4 (`0x4`).  A second
+netlink socket is created at startup, and after each uevent has been
+fully processed (device nodes created, symlinks set up, modules loaded),
+the original raw event is sent to the configured group(s).
+Rebroadcasting after processing ensures that device nodes and symlinks
+already exist by the time consumers receive the notification.
+
+Use `-g GROUP` to override the default group mask, or `-G` to disable
+rebroadcast entirely.  Bit 0 of the group mask is always forced off to
+prevent a feedback loop with the kernel's own multicast group.
+
+### Background
+
+The netlink uevent architecture uses separate multicast groups to
+isolate the kernel-to-device-manager channel from the device-manager-to-
+application channel:
+
+| **Group** | **Bit** | **Purpose**                                 |
+|-----------|---------|---------------------------------------------|
+| 1         | 0       | Kernel events (device manager listens here) |
+| 4         | 2       | Processed events (libudev consumers listen) |
+
+This two-group design was established by systemd/udevd and is the de
+facto standard.  [mdevd][] implements the same mechanism via its `-O`
+flag, and keventd follows the same convention.
+
+For more details, see:
+
+- [libudev-zero][] — daemonless replacement for libudev
+- [mdevd][] — mdev-compatible device manager with rebroadcast support
+
+
+Conditions
+----------
+
+keventd provides conditions in two namespaces:
+
+### Device Conditions (`dev/`)
+
+When a device node is created, keventd asserts a corresponding condition
+in `/run/finit/cond/dev/`.  This allows services to wait for specific
+devices:
+
+    service mdadm {
+        description = "RAID monitor"
+        runlevel    = "2345"
+        conditions  = { "dev/sda" }
+        command     = "/usr/sbin/mdadm --monitor /dev/md0"
+    }
+
+    service gps-daemon {
+        description = "GPS daemon"
+        runlevel    = "2345"
+        conditions  = { "dev/ttyUSB0" }
+        command     = "/usr/sbin/gps-daemon"
+    }
+
+Network interfaces are not device nodes and do not live in the `dev/`
+namespace -- a `/dev/wan` node created by a user must not be confused
+with a `wan` interface.  To wait for an interface, use the `netlink`
+plugin's `net/<iface>/exist` condition, plus `net/<iface>/up` (admin
+up) and `net/<iface>/running` (carrier present) to gate on link state:
+
+    service dhcpcd {
+        description = "DHCP client"
+        runlevel    = "2345"
+        conditions  = { "net/wan/exist" }
+        command     = "/usr/sbin/dhcpcd"
+    }
+
+keventd provides the parallel `class/net/<iface>` condition, like for
+any other sysfs class device.
+
+When the device is removed, the condition is cleared and Finit stops
+the dependent services.
+
+### Class Conditions (`class/`)
+
+Many devices live in sysfs without a `/dev/` node -- DSA switch ports,
+IIO sensors, LEDs, backlight, PHYs, regulators.  For those, keventd
+asserts `class/<subsystem>/<sysname>` on every `add` event so services
+can still wait for them:
+
+    service blink-blue {
+        description = "LED driver"
+        runlevel    = "2345"
+        conditions  = { "class/leds/blue" }
+        command     = "/usr/sbin/blink-blue"
+    }
+
+The condition is cleared on `remove`.
+
+### Driver Conditions (`driver/`)
+
+`driver/<name>` is asserted while the driver `<name>` is bound to at
+least one device, from the kernel's `bind`/`unbind` uevents.  Use this
+to gate on slow-probing hardware whose readiness isn't marked by a
+class device or `/dev` node, such as a switch core or complex PHY:
+
+    service dsa-probe {
+        description = "DSA topology probe"
+        runlevel    = "2345"
+        conditions  = { "driver/mt7530" }
+        command     = "/usr/sbin/dsa-probe"
+    }
+
+A driver bound to several devices keeps the condition asserted until
+the last device is unbound.  To wait for one specific device instance,
+gate on what its probe creates instead: the `class/` condition or
+`/dev` node of the child device.
+
+### Power Supply Conditions (`sys/pwr/`)
+
+keventd monitors the `power_supply` subsystem and provides:
+
+- `sys/pwr/ac` — asserted when AC power is connected
+
+This is useful for preventing power-hungry services from running on
+battery:
+
+    service cron {
+        description = "Cron daemon"
+        runlevel    = "2345"
+        conditions  = { "sys/pwr/ac", "pid/syslogd" }
+        command     = "cron -f"
+    }
+
+
+Usage
+-----
+
+    keventd [-cdGhnpSv] [-g GROUP] [-r DIR] [-t SECONDS]
+
+    Options:
+      -c        Run coldplug at startup
+      -d        Enable debug mode (foreground, verbose)
+      -g GROUP  Override netlink rebroadcast group (default: 4)
+      -G        Disable netlink rebroadcast entirely
+      -h        Show help text
+      -n        Run in foreground (no daemon)
+      -p        Passive mode: power supply events only
+      -r DIR    Extra rules directory
+      -S        Settle mode: wait for kernel uevent queue to quiet, then exit
+      -t SEC    Settle timeout (default 30s, used with -S)
+      -v        Show version
+
+In normal operation, Finit starts keventd automatically via its system
+configuration.  The `-d` flag is useful for debugging device issues --
+it runs keventd in the foreground and logs all received uevents.
+
+`keventd -S` is a one-shot command, not a flag to the running daemon.
+It is the `udevadm settle` equivalent for migration scenarios:
+
+    keventd -S -t 10 && start-graphical-session
+
+With D-Bus support it asks the running keventd over
+[`Device1.Settle`](#d-bus-interface-orgfinitdevice1), which tracks the
+event queue where the events actually flow.  When no bus answers --
+another device manager, or a build without D-Bus -- it falls back to
+polling `/sys/kernel/uevent_seqnum` until the kernel's sequence
+counter has been stable for 200ms, then exits zero.  After the
+`-t SECONDS` timeout (default 30) it exits non-zero instead.  The
+fallback works regardless of which device manager is active, or even
+if none is.
+
+Prefer the condition-based model (`<dev/X>`, `<class/...>`,
+`<driver/...>`) over settle when you control the service definition --
+settle is racy with slow probes that fire after the queue appears
+quiet.  It is provided for legacy boot scripts and init transitions
+where condition wiring isn't feasible.
+
+Debug logging can also be toggled at runtime by sending `SIGUSR1`:
+
+    kill -USR1 $(pidof keventd)
+
+
+D-Bus Interface (`org.finit.Device1`)
+-------------------------------------
+
+With D-Bus support (default, `--disable-dbus` opts out) keventd serves
+`org.finit.Device1` at `/org/finit/device` on its own brokerless bus,
+`unix:path=/run/keventd/bus`, the same way Finit serves
+[`org.finit`](dbus.md) on `/run/finit/bus`.  There is no forwarding
+between the two -- clients that want both connect to both.
+
+| Method        | In sig | Out sig | Priv. | Notes                                        |
+|---------------|--------|---------|-------|----------------------------------------------|
+| `Settle`      | `u`    | `b`     | no    | Wait until the event queue drains, timeout in seconds; `false` on timeout |
+| `Trigger`     | `ss`   | —       | yes   | Replay events: action, subsystem glob (empty = all) |
+| `Info`        | `s`    | `a{ss}` | no    | `/run/udev/data` properties for a devpath    |
+| `RulesReload` | —      | `u`     | yes   | Re-read the rules directories, returns rule count |
+
+| Property          | Sig | Notes                                     |
+|-------------------|-----|-------------------------------------------|
+| `QueueEmpty`      | `b` | No device events in flight                |
+| `SeqnumProcessed` | `t` | Highest kernel seqnum keventd has handled |
+
+| Signal            | Body                    | Fires when                      |
+|-------------------|-------------------------|---------------------------------|
+| `DeviceProcessed` | `ss` — devpath, action  | An event has been fully handled: node, symlinks, database |
+
+Example, wait up to ten seconds for the queue to drain:
+
+```sh
+dbus-send --address=unix:path=/run/keventd/bus \
+          --type=method_call --print-reply --dest=org.finit \
+          /org/finit/device org.finit.Device1.Settle uint32:10
+```
+
+In passive mode (`-p`) `Trigger` and `RulesReload` refuse -- device
+events are not handled here -- while `Settle` and the queue-state
+properties remain meaningful.
+
+keventd's conditions are symlinks to Finit's `reconf` generation
+marker, so they read the current generation by construction and never
+enter `flux` -- like user-defined conditions, they need no reassert
+after `initctl reload`.  Device state does not change because Finit
+re-read its configuration.
+
+
+Integration with Finit
+----------------------
+
+keventd is a standalone daemon started by Finit as an internal service.
+It communicates with Finit exclusively through the filesystem-based
+condition system — creating and removing symlinks in `/run/finit/cond/`.
+
+This means keventd can also be tested independently:
+
+    # Run in debug mode to see all kernel events
+    keventd -d
+
+    # Run with coldplug to populate /dev from scratch
+    keventd -c -n
+
+    # Run without rebroadcast (e.g., headless embedded system)
+    keventd -c -G
+
+Only one device manager should be active at a time.  This is settled
+at build time: with the hotplug plugin enabled, Finit starts keventd
+in passive mode (`-p`), leaving device management to the udevd, mdevd,
+or mdev service from `system/10-hotplug.conf` and monitoring only
+power supply events.  Without the hotplug plugin, keventd runs as the
+system device manager (`keventd -c`).
+
+[libudev-zero]: https://github.com/illiliti/libudev-zero
+[mdevd]:        https://skarnet.org/software/mdevd/

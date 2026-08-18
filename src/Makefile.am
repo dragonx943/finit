@@ -13,9 +13,6 @@ pkglibexec_PROGRAMS  = getty logit runparts tmpfiles
 if SULOGIN
 pkglibexec_PROGRAMS += sulogin
 endif
-if KEVENTD
-pkglibexec_PROGRAMS += keventd
-endif
 if WATCHDOGD
 pkglibexec_PROGRAMS += watchdogd
 endif
@@ -29,11 +26,6 @@ getty_SOURCES        = finit.h getty.c helpers.h logrotate.c stty.c utmp-api.c u
 getty_CFLAGS         = -W -Wall -Wextra -std=gnu99
 getty_CFLAGS        += $(lite_CFLAGS)
 getty_LDADD          = $(lite_LIBS)
-
-keventd_SOURCES      = keventd.c iwatch.c iwatch.h util.c util.h
-keventd_CFLAGS       = -W -Wall -Wextra -std=gnu99
-keventd_CFLAGS      += $(lite_CFLAGS)
-keventd_LDADD        = $(lite_LIBS)
 
 runparts_SOURCES     = runparts.c
 runparts_CFLAGS      = -W -Wall -Wextra -std=gnu99
@@ -105,11 +97,12 @@ endif
 initctl_SOURCES    = initctl.c initctl.h cgutil.c cgutil.h		\
 		     client.c client.h cond.c cond.h reboot.c		\
 		     serv.c serv.h svc.h util.c util.h log.h
+initctl_CPPFLAGS   = $(AM_CPPFLAGS)
 initctl_CFLAGS     = -W -Wall -Wextra -Wno-unused-parameter -std=gnu99
 initctl_CFLAGS    += $(lite_CFLAGS) $(uev_CFLAGS)
 initctl_LDADD      = $(lite_LIBS) $(uev_LIBS)
 if DBUS
-initctl_CPPFLAGS   = $(AM_CPPFLAGS) -I$(top_srcdir)/libink
+initctl_CPPFLAGS  += -I$(top_srcdir)/libink
 initctl_LDADD     += $(top_builddir)/libink/libink.la
 endif
 

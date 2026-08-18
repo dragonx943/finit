@@ -61,53 +61,19 @@ static int call(int (*action)(svc_t *, void *), char *buf, size_t len)
 static int stop(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-
-	if (!svc)
-		return 1;
-
-	service_timeout_cancel(svc);
-	svc_stop(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-
-	return 0;
+	return service_stop_now(svc);
 }
 
 static int start(svc_t *svc, void *user_data)
 {
 	(void)user_data;
-
-	if (!svc)
-		return 1;
-
-	service_timeout_cancel(svc);
-	svc_start(svc);
-	service_step(svc);
-	if (!IS_RESERVED_RUNLEVEL(runlevel))
-		service_step_all(SVC_TYPE_ANY);
-
-	return 0;
+	return service_start_now(svc);
 }
 
-/*
- * NOTE: this does not wait for svc to be stopped first, that is the
- *       responsibility of initctl to do.  Otherwise we'd block PID 1,
- *       or introduce some nasty race conditions.
- */
 static int restart(svc_t *svc, void *user_data)
 {
-	if (!svc)
-		return 1;
-
-	if (!svc_is_running(svc))
-		return start(svc, user_data);
-
-	service_timeout_cancel(svc);
-	service_stop(svc);
-	service_step(svc);
-
-	return 0;
+	(void)user_data;
+	return service_restart_now(svc);
 }
 
 static int reload(svc_t *svc, void *user_data)
@@ -222,16 +188,7 @@ static svc_t *do_find_byc(char *buf, size_t len)
 	return svc_find_by_cond(input);
 }
 
-static void bypass_shutdown(void *);
-struct wq emergency = { .cb = bypass_shutdown };
 
-static void bypass_shutdown(void *unused)
-{
-	(void)unused;
-
-	cprintf("TIMEOUT TIMEOUT SHUTTING DOWN NOW!!\n");
-	do_shutdown(halt);
-}
 
 /*
  * Handle switch_root API command.
@@ -302,10 +259,7 @@ static int do_reboot(int cmd, int timeout, char *buf, size_t len)
 		return 255;
 	}
 
-	if (timeout > 0) {
-		emergency.delay = timeout * 1000;
-		schedule_work(&emergency);
-	}
+	shutdown_bypass(timeout);
 
 	switch (cmd) {
 	case INIT_CMD_REBOOT:
@@ -375,8 +329,8 @@ static void api_cb(uev_t *w, void *arg, int events)
 {
 	static svc_t *iter = NULL;
 	struct init_request rq;
-	int sd, lvl;
 	svc_t *svc;
+	int sd;
 
 	(void)arg;
 
@@ -454,14 +408,6 @@ static void api_cb(uev_t *w, void *arg, int events)
 
 		switch (rq.cmd) {
 		case INIT_CMD_RUNLVL:
-			/* Allow changing cfglevel in runlevel S */
-			if (IS_RESERVED_RUNLEVEL(runlevel)) {
-				if (runlevel != INIT_LEVEL) {
-					warnx("Cannot abort runlevel 6/0.");
-					break;
-				}
-			}
-
 			switch (rq.runlevel) {
 			case 's':
 			case 'S':
@@ -470,17 +416,7 @@ static void api_cb(uev_t *w, void *arg, int events)
 
 			case '0'...'9':
 				dbg("Setting new runlevel %c", rq.runlevel);
-				lvl = rq.runlevel - '0';
-				if (lvl == 0)
-					halt = SHUT_OFF;
-				if (lvl == 6)
-					halt = SHUT_REBOOT;
-
-				/* User requested change in next runlevel */
-				if (runlevel == INIT_LEVEL)
-					cfglevel = lvl;
-				else
-					sm_runlevel(lvl);
+				sm_request_runlevel(rq.runlevel - '0');
 				break;
 
 			default:

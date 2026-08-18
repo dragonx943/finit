@@ -322,6 +322,58 @@ static int mode_call_s(int argc, char *argv[])
 	return do_call(argv[2], argv[3], argv[4], argv[5], argv[6]);
 }
 
+/* "u" and "su" variants for methods taking a uint32 argument */
+static int do_call_u(const char *sock, const char *obj, const char *iface,
+		     const char *method, const char *arg, uint32_t val)
+{
+	link_client_t *c;
+	int rc;
+
+	c = link_client_open(sock);
+	if (!c) return 2;
+
+	rc = arg
+		? link_client_call_v(c, obj, iface, method, "su", arg, val)
+		: link_client_call_v(c, obj, iface, method, "u", val);
+	rc = report_rc(c, rc);
+	if (rc == 0)
+		printf("OK\n");
+	link_client_close(c);
+	return rc;
+}
+
+static int mode_call_ss(int argc, char *argv[])
+{
+	link_client_t *c;
+	int rc;
+
+	if (argc != 8) return 2;
+	c = link_client_open(argv[2]);
+	if (!c) return 2;
+
+	rc = link_client_call_v(c, argv[3], argv[4], argv[5],
+				"ss", argv[6], argv[7]);
+	rc = report_rc(c, rc);
+	if (rc == 0)
+		printf("OK\n");
+	link_client_close(c);
+	return rc;
+}
+
+static int mode_call_u(int argc, char *argv[])
+{
+	if (argc != 7) return 2;
+	return do_call_u(argv[2], argv[3], argv[4], argv[5], NULL,
+			 (uint32_t)strtoul(argv[6], NULL, 0));
+}
+
+static int mode_call_su(int argc, char *argv[])
+{
+	if (argc != 8) return 2;
+	return do_call_u(argv[2], argv[3], argv[4], argv[5], argv[6],
+			 (uint32_t)strtoul(argv[7], NULL, 0));
+}
+
 static int mode_call_void(int argc, char *argv[])
 {
 	if (argc != 6) return 2;
@@ -375,7 +427,7 @@ static int mode_get_service(int argc, char *argv[])
 
 /*
  * getprop BUS PATH IFACE PROP -- Properties.Get, prints the variant
- * value; dispatches on the wire signature, "s" and "u" supported.
+ * value; dispatches on the wire signature: s, u, b, and t.
  */
 static int mode_getprop(int argc, char *argv[])
 {
@@ -405,6 +457,21 @@ static int mode_getprop(int argc, char *argv[])
 			printf("%s\n", s);
 		else if (type == 'u' && link_r_u32(&reader, &u) == 0)
 			printf("%u\n", u);
+		else if (type == 'b') {
+			int b;
+
+			if (link_r_bool(&reader, &b) == 0)
+				printf("%s\n", b ? "true" : "false");
+			else
+				rc = 2;
+		} else if (type == 't') {
+			uint64_t t;
+
+			if (link_r_u64(&reader, &t) == 0)
+				printf("%llu\n", (unsigned long long)t);
+			else
+				rc = 2;
+		}
 		else {
 			fprintf(stderr, "unsupported variant type '%c'\n", type);
 			rc = 2;
@@ -513,6 +580,9 @@ int main(int argc, char *argv[])
 	if (!strcmp(argv[1], "introspect"))       return mode_introspect      (argc, argv);
 	if (!strcmp(argv[1], "liststrings"))      return mode_liststrings     (argc, argv);
 	if (!strcmp(argv[1], "call-s"))           return mode_call_s          (argc, argv);
+	if (!strcmp(argv[1], "call-ss"))          return mode_call_ss         (argc, argv);
+	if (!strcmp(argv[1], "call-u"))           return mode_call_u          (argc, argv);
+	if (!strcmp(argv[1], "call-su"))          return mode_call_su         (argc, argv);
 	if (!strcmp(argv[1], "call-void"))        return mode_call_void       (argc, argv);
 	if (!strcmp(argv[1], "call-s-as-uid"))    return mode_call_s_as_uid   (argc, argv);
 	if (!strcmp(argv[1], "call-void-as-uid")) return mode_call_void_as_uid(argc, argv);

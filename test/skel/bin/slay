@@ -30,6 +30,13 @@ fi
 timeout=50
 while [ "$pid" -le 1 ]; do
     sleep 0.1
+    # Once Finit gives up on a service it forks the post:script and
+    # reports that PID as the service's, so a slay still waiting for
+    # the service to come back would kill the script instead.
+    st=$(initctl -p status "$nm" 2>/dev/null | awk '/Status/{print $3}')
+    if [ "$st" = "crashed" ]; then
+	exit 1
+    fi
     pid=$(getpid "$nm")
     if [ "$pid" -le 1 ]; then
 	timeout=$((timeout - 1))

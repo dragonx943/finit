@@ -155,6 +155,19 @@ void link_server_set_authorizer(link_server_t *server, link_authorizer_t cb,
  * asked about; a reply callback is handed it as its first argument. */
 void link_uid_resolved(link_connection_t *conn, link_authz_t tok, uid_t uid);
 
+/* ----------  handler-deferred replies  ---------- */
+
+/* A handler that cannot answer yet parks the call and returns 0
+ * without replying; the framework sends nothing.  Resume re-runs the
+ * handler with link_call_resumed() reading true, and this time it
+ * must reply -- a resumed call cannot park again.  Parked calls that
+ * are never resumed are expired by link_connection_expire() with a
+ * TimedOut error.  Room is limited (four per connection); a failed
+ * park means answer now. */
+int  link_call_park   (link_call_t *call, link_authz_t *tok);
+void link_call_resume (link_connection_t *conn, link_authz_t tok);
+int  link_call_resumed(const link_call_t *call);
+
 /* Called with the reply to an outbound link_connection_call().  `reply`
  * is NULL if the connection dropped before one arrived. */
 typedef void (*link_reply_cb_t)(link_connection_t *conn, const link_reply_t *reply,
@@ -247,10 +260,20 @@ typedef struct {
 	link_property_getter_fn getter;
 } link_property_t;
 
+/*
+ * Declares a signal for introspection only; emission is unchecked,
+ * see link_connection_emit_signal().
+ */
+typedef struct {
+	const char            *name;      /* member name */
+	const char            *sig;       /* D-Bus signature, e.g. "sss" */
+} link_signal_t;
+
 typedef struct {
 	const char            *interface;     /* e.g. "org.finit.Manager1" */
 	const link_method_t   *methods;       /* terminated by {NULL, ...}, or NULL */
 	const link_property_t *properties;    /* terminated by {NULL, ...}, or NULL */
+	const link_signal_t   *signals;       /* terminated by {NULL, ...}, or NULL */
 } link_vtable_t;
 
 /* Register one (interface, methods) at `path`.  Calling repeatedly
@@ -270,6 +293,7 @@ const char *link_call_path     (const link_call_t *call);
 const char *link_call_interface(const link_call_t *call);
 const char *link_call_member   (const link_call_t *call);
 uid_t       link_call_uid      (const link_call_t *call);
+link_connection_t *link_call_connection(const link_call_t *call);
 
 /* ----------  reading method-call arguments  ----------
  *
@@ -283,6 +307,7 @@ uid_t       link_call_uid      (const link_call_t *call);
 int link_call_read_byte  (link_call_t *call, uint8_t  *out);
 int link_call_read_bool  (link_call_t *call, int      *out);
 int link_call_read_u32   (link_call_t *call, uint32_t *out);
+int link_call_read_u64   (link_call_t *call, uint64_t *out);
 int link_call_read_string(link_call_t *call, const char **out);  /* "s" */
 int link_call_read_path  (link_call_t *call, const char **out);  /* "o" */
 
@@ -424,6 +449,7 @@ ssize_t link_writer_finish(link_writer_t *w);
 void link_w_byte    (link_writer_t *w, uint8_t v);
 void link_w_bool    (link_writer_t *w, int v);
 void link_w_u32     (link_writer_t *w, uint32_t v);
+void link_w_u64     (link_writer_t *w, uint64_t v);      /* "t" */
 void link_w_string  (link_writer_t *w, const char *s);  /* "s" */
 void link_w_path    (link_writer_t *w, const char *s);  /* "o" */
 void link_w_variant_string(link_writer_t *w, const char *s); /* "v" containing "s" */
@@ -441,6 +467,7 @@ void   link_reader_init(link_reader_t *r, const uint8_t *body, size_t len);
 int    link_r_byte    (link_reader_t *r, uint8_t  *out);
 int    link_r_bool    (link_reader_t *r, int      *out);
 int    link_r_u32     (link_reader_t *r, uint32_t *out);
+int    link_r_u64     (link_reader_t *r, uint64_t *out);
 int    link_r_string  (link_reader_t *r, const char **out);  /* "s" */
 int    link_r_path    (link_reader_t *r, const char **out);  /* "o" */
 int    link_r_variant_begin (link_reader_t *r, char *type);       /* sig header, cursor at value */

@@ -32,6 +32,7 @@ Features
   * [Pre/Post script actions](config/service-wrappers.md)
   * Rudimentary [templating support](config/templating.md)
   * [Tooling](initctl.md) to enable/disable services
+  * [D-Bus API](dbus.md), `org.finit` control and signals for bus clients
   * [Automatic reload](features.md#automatic-reload) of modified configuration files (optional)
   * [Built-in getty](config/tty.md)
   * Built-in watchdog, with support for hand-over to [watchdogd][]

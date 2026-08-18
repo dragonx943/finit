@@ -8,6 +8,13 @@ optional plugins to enable.  It depends on three external libraries:
 - [libite][] (-lite), much needed frog DNA
 - [libConfuse][], the parser behind the .conf format
 
+The bundled device manager, keventd, needs a fourth: libblkid from
+[util-linux][].  It reads the filesystem UUID and label off block
+devices, which is what the curated rules name the `/dev/disk/by-uuid/`
+and `/dev/disk/by-label/` symlinks after.  keventd is enabled by
+default, so this is a hard requirement unless you build with
+`--without-keventd`.
+
 > [!IMPORTANT]
 > Most free/open source software packages that use `configure` default
 > to install to `/usr/local`.  However, some Linux distributions do no
@@ -24,6 +31,7 @@ version of the above mentioned libraries.  Currently required versions:
 - libite v2.2.0, or later
 - libuEv v2.2.0, or later
 - libConfuse v3.3, or later
+- libblkid, any version, when keventd is enabled
 
 
 Configure
@@ -66,6 +74,10 @@ Below are a few of the main switches to configure:
 * `--enable-resolvconf-plugin`: Enable the `resolvconf.so` optional plugin.
 
 * `--enable-x11-common-plugin`: Enable the optional X Window `x11-common.so` plugin.
+
+* `--without-keventd`: Drop the bundled device manager, for systems that
+  run mdev, mdevd, or udevd instead.  Enabled by default, and the only
+  thing that pulls in libblkid.  See [Bundled Device Manager](keventd.md).
 
 * `--with-sulogin`: Enable bundled `sulogin` program.  Default is to use the
   system `sulogin(8)`.  The sulogin shipped with Finit *allows password-less*
@@ -259,3 +271,4 @@ it only for debugging start up issues when Finit crashes.
 [libuEv]:  https://github.com/troglobit/libuev
 [libite]:  https://github.com/troglobit/libite
 [libConfuse]: https://github.com/libconfuse/libconfuse
+[util-linux]: https://github.com/util-linux/util-linux

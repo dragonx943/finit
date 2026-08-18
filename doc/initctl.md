@@ -5,6 +5,11 @@ Finit also implements a modern API to query status, and start/stop
 services, called `initctl`.  Unlike `telinit` the `initctl` tool does
 not return until the given command has fully completed.
 
+Since Finit v5, `initctl` talks to Finit over the built-in
+[D-Bus API](dbus.md) when the bus socket is available, falling back
+to the legacy `INIT_SOCKET` transport.  The `monitor` command streams
+the `org.finit` signals until interrupted.
+
 ```
 Usage: initctl [OPTIONS] [COMMAND]
 
@@ -14,6 +19,7 @@ Options:
   -f, --force               Ignore missing files and arguments, never prompt
   -h, --help                This help text
   -j, --json                JSON output in 'status' and 'cond' commands
+  -n, --noerr               Ignore error, e.g., already started/enabled/...
   -1, --once                Only one lap in commands like 'top'
   -p, --plain               Use plain table headings, no ctrl chars
   -q, --quiet               Silent, only return status of command
@@ -26,15 +32,8 @@ Commands:
   help                      This help text
   version                   Show program version
 
-  ls | list                 List all .conf in /etc/finit.d
-  create   <CONF>           Create   .conf in /etc/finit.d/available
-  delete   <CONF>           Delete   .conf in /etc/finit.d/available
-  show     <CONF>           Show     .conf in /etc/finit.d/available
-  edit     <CONF>           Edit     .conf in /etc/finit.d/available
-  touch    <CONF>           Change   .conf in /etc/finit.d/available
-  enable   <CONF>           Enable   .conf in /etc/finit.d/available
-  disable  <CONF>           Disable  .conf in /etc/finit.d/enabled
-  reload                    Reload  *.conf in /etc/finit.d (activate changes)
+  show                      Show     /etc/finit.conf
+  reload                    Reload   /etc/finit.conf (activate changes)
 
   cond     set   <COND>     Set (assert) user-defined conditions     +usr/COND
   cond     get   <COND>     Get status of user-defined condition, see $? and -v
@@ -50,6 +49,7 @@ Commands:
                             Note: Finit .conf file(s) are *not* reloaded!
   restart  <NAME>[:ID]      Restart (stop/start) service by name
   kill     <NAME>[:ID] <S>  Send signal S to service by name, with optional ID
+  monitor                   Stream D-Bus signals (service state, conditions) until ^C
   ident    [NAME]           Show matching identities for NAME, or all
   status   <NAME>[:ID]      Show service status, by name
   status                    Show status of services, default command
@@ -65,9 +65,10 @@ Commands:
   halt                      Halt system
   poweroff                  Halt and power off system
   suspend                   Suspend system
-  switch-root NEWROOT [INIT]  Switch to new root filesystem (initramfs only)
+  switch-root ROOT [INIT]   Switch to new root filesystem (initramfs)
 
   utmp     show             Raw dump of UTMP/WTMP db
+
 ```
 
 For services *not* supporting `SIGHUP` the `<!>` notation in the .conf

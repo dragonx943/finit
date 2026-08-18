@@ -95,6 +95,53 @@ static void shutdown_wdt_cb(uev_t *w, void *arg, int events)
 }
 
 /*
+ * Emergency shutdown bypass, same job as the shutdown watchdog above
+ * but armed by the user: `initctl -t SEC reboot`, on either transport.
+ */
+static void bypass_shutdown(void *unused)
+{
+	(void)unused;
+
+	cprintf("TIMEOUT TIMEOUT SHUTTING DOWN NOW!!\n");
+	do_shutdown(halt);
+}
+
+static struct wq emergency = { .cb = bypass_shutdown };
+
+void shutdown_bypass(int timeout)
+{
+	if (timeout <= 0)
+		return;
+
+	emergency.delay = timeout * 1000;
+	schedule_work(&emergency);
+}
+
+/*
+ * User-requested runlevel change, shared by the legacy API and the
+ * D-Bus SetRunlevel method.  Refused in runlevel 0/6, deferred via
+ * cfglevel during bootstrap.
+ */
+void sm_request_runlevel(int lvl)
+{
+	if (IS_RESERVED_RUNLEVEL(runlevel) && runlevel != INIT_LEVEL) {
+		warnx("Cannot abort runlevel 6/0.");
+		return;
+	}
+
+	if (lvl == 0)
+		halt = SHUT_OFF;
+	if (lvl == 6)
+		halt = SHUT_REBOOT;
+
+	/* Runlevel S: user requested change in next runlevel */
+	if (runlevel == INIT_LEVEL)
+		cfglevel = lvl;
+	else
+		sm_runlevel(lvl);
+}
+
+/*
  * Console input callback - handles Ctrl-C during bootstrap wait
  */
 static void console_input_cb(uev_t *w, void *arg, int events)
@@ -586,6 +633,9 @@ restart:
 		service_step_all(SVC_TYPE_ANY);
 
 		dbg("Reconfiguration done");
+#ifdef HAVE_DBUS
+		dbus_notify_reload();
+#endif
 		sm.state = SM_RUNNING_STATE;
 		break;
 	}

@@ -22,6 +22,10 @@ Bus address
 | Local (always)         | `unix:path=/run/finit/bus`                  |
 | System (opportunistic) | `unix:path=/var/run/dbus/system_bus_socket` |
 
+The bundled device manager serves its own `org.finit.Device1` the same
+way on `unix:path=/run/keventd/bus`, see [keventd](keventd.md); one
+socket per daemon, no forwarding between them.
+
 The **local** bus is brokerless: clients connect straight to Finit over a
 Unix-domain socket using the standard D-Bus SASL EXTERNAL handshake.  No
 `dbus-daemon` is required, which makes it suitable for embedded systems that
@@ -32,6 +36,17 @@ The socket is `0660`, owned by `root` and the group given to
 `initctl` falls back on.  The bus reaches every operation `initctl`
 does, so restricting one and not the other would leave the door open.
 Members of that group may use it, see [Authorization](#authorization).
+
+Finit accepts at most 64 concurrent local-bus peers; further
+connections are refused until one disconnects.  Match rules given to
+`AddMatch` support the `type`, `interface`, `member`, and `path` keys;
+`arg0` and its variants are not implemented.
+
+For the system bus a standard busconfig policy ships in
+`dbus-1/org.finit.conf`: only root may own `org.finit`, unprivileged
+callers reach introspection, properties, and the read-only methods.
+Finit also enforces per-method authorization itself, so a permissive
+policy installed by mistake does not open state-changing methods.
 
 The **system** bus is best-effort: Finit probes for a running `dbus-daemon`
 and, when reachable, claims the well-known name `org.finit` so that standard
@@ -67,7 +82,7 @@ Every node implements the usual stock interfaces:
 
 | Interface                             | Purpose                                   |
 |---------------------------------------|-------------------------------------------|
-| `org.freedesktop.DBus`                | `Hello`, `AddMatch`, `RemoveMatch`        |
+| `org.freedesktop.DBus`                | `Hello`, `AddMatch`, `RemoveMatch` — on `/org/freedesktop/DBus` only |
 | `org.freedesktop.DBus.Peer`           | `Ping`, `GetMachineId`                    |
 | `org.freedesktop.DBus.Introspectable` | `Introspect()` — XML description          |
 | `org.freedesktop.DBus.Properties`     | `Get`, `GetAll`; nothing is writable      |
@@ -91,11 +106,19 @@ and the service registry.
 | `Stop`                       | `s`    | —       | yes   | Stop the service(s) matching the identity                 |
 | `Restart`                    | `s`    | —       | yes   | Restart (stop + start) the service(s)                     |
 | `Reload`                     | —      | —       | yes   | Re-read all `*.conf` and apply changes                    |
-| `SetRunlevel`                | `u`    | —       | yes   | Transition to runlevel `u` (0–6)                          |
+| `SetRunlevel`                | `u`    | —       | yes   | Transition to runlevel `u` (0–9)                          |
 | `SetDebug`                   | —      | —       | yes   | Toggle Finit's runtime debug flag                         |
 | `Signal`                     | `su`   | —       | yes   | Send signal `u` (1–31) to services matching identity `s`  |
 | `Suspend`                    | —      | —       | yes   | `sync()` + suspend-to-RAM                                 |
-| `Reboot`, `Halt`, `Poweroff` | —      | —       | yes   | Trigger the corresponding shutdown sequence               |
+| `Reboot`, `Halt`, `Poweroff` | `u`    | —       | yes   | Trigger the corresponding shutdown sequence; the argument arms the emergency fallback timer (seconds, 0 = none) |
+
+Edge cases follow the legacy `initctl` protocol: `Suspend` and the
+reboot family reply `WrongRunlevel` during bootstrap and shutdown,
+`SetRunlevel` is a warning + no-op in runlevel 0/6 and records the
+level for the end of bootstrap in runlevel S, and `Signal` fails for
+stopped services.  One deliberate divergence: a `SetRunlevel` argument
+outside 0–9 returns `InvalidArgs`, where the legacy protocol
+acknowledges silently.
 
 ### Properties
 
@@ -114,6 +137,7 @@ All read-only strings; observable via `Properties.Get` and
 |-----------------------|----------------------------------------|------------------------|
 | `ServiceStateChanged` | `sss` — identity, old state, new state | Service transitions    |
 | `RunlevelChanged`     | `ss`  — old level, new level           | System runlevel change |
+| `ConfigReloaded`      | —                                      | `initctl reload` completed; providers of generation-file conditions re-assert |
 
 State names emitted by `ServiceStateChanged` are stable wire strings:
 `halted`, `done`, `dead`, `cleanup`, `teardown`, `stopping`, `setup`,
@@ -135,7 +159,7 @@ constructing it by hand.
 | `Start`   | —      | —       | yes   | Equivalent to `Manager1.Start(<identity>)` for this service |
 | `Stop`    | —      | —       | yes   | …                                                           |
 | `Restart` | —      | —       | yes   | …                                                           |
-| `Reload`  | —      | —       | yes   | Reload (SIGHUP if supported, else restart)                  |
+| `Reload`  | —      | —       | yes   | Send the service's `reload-signal`, default `SIGHUP`; restart when set to `"none"` |
 
 ### Properties
 
@@ -195,6 +219,18 @@ Lives at **`/org/finit/cond`**.  Exposes Finit's
 Note: non-`usr/*` paths are rejected with `InvalidArgs` -- system
 conditions belong to Finit's state machine.
 
+A service consuming such a condition:
+
+    service alarm {
+        description = "Foo alarm"
+        runlevel    = "2345"
+        conditions  = { "usr/data-ready" }
+        command     = "alarm --arg foo"
+    }
+
+asserted from any bus client with `Cond1.Set string:"data-ready"`, see
+the examples below.
+
 ### Signals
 
 | Signal             | Body                   | Fires when                            |
@@ -250,12 +286,12 @@ the following subcommands use the bus first:
 | `initctl restart`          | `Manager1.Restart(svc)`                          |
 | `initctl reload`           | `Manager1.Reload()`                              |
 | `initctl reload S`         | `Service1.Reload()` (per-svc)                    |
-| `initctl reboot`           | `Manager1.Reboot()`                              |
-| `initctl halt`             | `Manager1.Halt()`                                |
-| `initctl poweroff`         | `Manager1.Poweroff()`                            |
+| `initctl reboot`           | `Manager1.Reboot(timeout)`                       |
+| `initctl halt`             | `Manager1.Halt(timeout)`                         |
+| `initctl poweroff`         | `Manager1.Poweroff(timeout)`                     |
 | `initctl suspend`          | `Manager1.Suspend()`                             |
 | `initctl debug`            | `Manager1.SetDebug()`                            |
-| `initctl signal`           | `Manager1.Signal(svc, signo)`                    |
+| `initctl signal` (or `kill`) | `Manager1.Signal(svc, signo)`                  |
 | `initctl runlevel`         | `Properties.Get(Manager1.Runlevel/PrevRunlevel)` |
 | `initctl cond set/get/clear` | `Cond1.{Set,Get,Clear}`, `clr` is an alias     |
 

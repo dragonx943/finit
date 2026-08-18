@@ -40,6 +40,11 @@ For your convenience a set of *optional* plugins are available:
   `tmpfiles.d/dbus.conf`, both overridable from `/etc`; the plugin
   itself only handles what has to inspect the running system.
 
+  Not to be confused with Finit's built-in [D-Bus API](dbus.md): the
+  plugin (`--disable-dbus-plugin`) starts the external system bus
+  daemon, while the built-in support (`--disable-dbus`) is the
+  `org.finit` interface served by Finit itself.
+
 * *hook-scripts.so*: Trigger the execution of scripts from plugin hook
   points (see [Hooks](#hooks)).  _Optional plugin._
 

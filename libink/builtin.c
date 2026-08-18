@@ -152,6 +152,13 @@ static void emit_property(struct xbuf *x, const link_property_t *p)
 		p->name, p->sig ? p->sig : "s");
 }
 
+static void emit_signal(struct xbuf *x, const link_signal_t *s)
+{
+	xprintf(x, "    <signal name=\"%s\">\n", s->name);
+	emit_args(x, s->sig, "out");
+	xprintf(x, "    </signal>\n");
+}
+
 static const char STANDARD_INTERFACES_XML[] =
 	"  <interface name=\"org.freedesktop.DBus.Introspectable\">\n"
 	"    <method name=\"Introspect\">\n"
@@ -173,6 +180,28 @@ static const char STANDARD_INTERFACES_XML[] =
 	"    <method name=\"GetAll\">\n"
 	"      <arg name=\"interface\" type=\"s\" direction=\"in\"/>\n"
 	"      <arg name=\"props\"     type=\"a{sv}\" direction=\"out\"/>\n"
+	"    </method>\n"
+	"    <signal name=\"PropertiesChanged\">\n"
+	"      <arg name=\"interface\"  type=\"s\"/>\n"
+	"      <arg name=\"changed\"    type=\"a{sv}\"/>\n"
+	"      <arg name=\"invalidated\" type=\"as\"/>\n"
+	"    </signal>\n"
+	"  </interface>\n";
+
+/*
+ * Hello/AddMatch/RemoveMatch are answered on the canonical
+ * /org/freedesktop/DBus object only, so declare them only there.
+ */
+static const char DBUS_DRIVER_XML[] =
+	"  <interface name=\"org.freedesktop.DBus\">\n"
+	"    <method name=\"Hello\">\n"
+	"      <arg name=\"name\" type=\"s\" direction=\"out\"/>\n"
+	"    </method>\n"
+	"    <method name=\"AddMatch\">\n"
+	"      <arg name=\"rule\" type=\"s\" direction=\"in\"/>\n"
+	"    </method>\n"
+	"    <method name=\"RemoveMatch\">\n"
+	"      <arg name=\"rule\" type=\"s\" direction=\"in\"/>\n"
 	"    </method>\n"
 	"  </interface>\n";
 
@@ -219,6 +248,8 @@ static int handle_introspect(link_connection_t *conn, const struct link_msg *m)
 		"<node>\n");
 
 	xprintf(&x, "%s", STANDARD_INTERFACES_XML);
+	if (!strcmp(path, "/org/freedesktop/DBus"))
+		xprintf(&x, "%s", DBUS_DRIVER_XML);
 
 	o = NULL;
 	{
@@ -238,6 +269,7 @@ static int handle_introspect(link_connection_t *conn, const struct link_msg *m)
 
 		TAILQ_FOREACH(e, &o->vtables, link) {
 			const link_property_t *prop;
+			const link_signal_t *sig;
 
 			xprintf(&x, "  <interface name=\"%s\">\n",
 				e->vt->interface);
@@ -247,6 +279,9 @@ static int handle_introspect(link_connection_t *conn, const struct link_msg *m)
 			if (e->vt->properties)
 				for (prop = e->vt->properties; prop->name; prop++)
 					emit_property(&x, prop);
+			if (e->vt->signals)
+				for (sig = e->vt->signals; sig->name; sig++)
+					emit_signal(&x, sig);
 			xprintf(&x, "  </interface>\n");
 		}
 	}
