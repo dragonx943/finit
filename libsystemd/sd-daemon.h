@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SD_LISTEN_FDS_START 3
 
 /* systemd logging defines for stderr parsing by Finit */
@@ -34,5 +38,9 @@ int sd_watchdog_enabled(int unset_environment, uint64_t *usec);
 
 /* System detection */
 int sd_booted(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif	/* SD_DAEMON_H_ */
