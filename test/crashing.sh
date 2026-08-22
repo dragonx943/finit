@@ -8,7 +8,7 @@ TEST_DIR=$(dirname "$0")
 test_teardown()
 {
     say "Running test teardown."
-    run "rm -f $FINIT_CONF" "/tmp/post"
+    run "rm -f $FINIT_CONF /tmp/post"
 }
 
 crashit()
@@ -48,8 +48,7 @@ test_one()
     fi
 
     retry "assert_status $nm crashed" 500
-    run "cat /tmp/post"
-    assert_file_contains "/tmp/post" "POST"
+    retry "assert_file_contains /tmp/post POST" 100
     run "rm -f /tmp/post"
 }
 

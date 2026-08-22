@@ -58,5 +58,15 @@ done
 
 echo "$pid" > /tmp/oldpid
 
+# The check above only runs while waiting for a PID to appear.  Finit
+# reports the post:script's PID as the service's once it has given up
+# restarting, so a PID that was already there needs the same guard:
+# killing it would take out the script instead of the service, and the
+# side effects the test is waiting for never happen.
+st=$(initctl -p status "$nm" 2>/dev/null | awk '/Status/{print $3}')
+if [ "$st" = "crashed" ]; then
+    exit 1
+fi
+
 #echo "PID $pid, kill -9 ..."
 kill -9 "$pid" 2>/dev/null || true
